@@ -1,7 +1,8 @@
 # NewNews — AI-Powered News Intelligence Pipeline (Nepal)
 
-> **Status:** Phase 0 complete — plan and architecture decided, implementation not yet started.
-> This README captures the step-by-step plan and the architectural decisions made so far.
+> **Status:** M1 vertical slice implemented — text ingestion → stub-AI pipeline → client
+> matching → REST + SSE delivery, with tests (42 passing against Postgres) and a Docker build.
+> M0 docs live in `docs/` (requirements, architecture, data-model, roadmap, ADRs 0001–0006).
 
 NewNews is a prototype news-intelligence platform that accepts raw news/media (text, images,
 audio, video, documents), extracts and processes its content, assesses credibility, enriches it
@@ -17,7 +18,7 @@ practical trade-offs.
 | Item | Finding | Source |
 |---|---|---|
 | Repository | Greenfield — only an MIT `LICENSE` existed | local inspection |
-| Host machine | Ubuntu 24.04, Python 3.13.7, Node 20, .NET 10 SDK; **no Docker installed** (to be installed for build/verification) | local inspection |
+| Host machine | Ubuntu 24.04, Python 3.13.7, Node 20, .NET 10 SDK; Docker Engine + Compose and PostgreSQL 16 installed during M1 (were missing in Phase 0) | local inspection |
 | Groq | Has a **free plan** with rate limits (e.g. `whisper-large-v3`: 20 RPM / 2K RPD; `openai/gpt-oss-120b`: 30 RPM / 200K TPM). OpenAI-compatible API at `https://api.groq.com/openai/v1`. Offers Speech-to-Text, OCR/Image Recognition, Structured Outputs | [Groq docs – Overview](https://console.groq.com/docs/overview), [Rate Limits](https://console.groq.com/docs/rate-limits) |
 | Render + Docker | Render **fully supports Docker** deploys (builds from Dockerfile via BuildKit); explicitly recommended when OS-level packages (ffmpeg, tesseract) are required. Persistent disks, private networking, pre-deploy commands supported | [render.com/docs/docker](https://render.com/docs/docker) |
 | FastAPI | v0.143.0 (Oct 2026), MIT, Python 3.10–3.14, Pydantic v2 | [pypi.org/project/fastapi](https://pypi.org/project/fastapi/) |
@@ -41,7 +42,7 @@ practical trade-offs.
 | Media/original storage | Postgres + local volume (`/data/media`); S3-compatible object storage noted as the production path | Render free tier has ephemeral disks — documented limitation |
 | Delivery | REST + **Server-Sent Events** (`/events`); DB-polling (≈200 ms) for cross-process notify in M1 | Meets <2s delivery objective; `LISTEN/NOTIFY` upgrade planned in M3 |
 | Auth | API keys per client/subscriber (hashed, in DB), `Authorization: Bearer` | Simple, real, demonstrable |
-| Local dev | **Docker Compose**: `api` + `worker` + `db`, healthchecks, volumes, `.env` config | `docker compose up --build` is the only prerequisite |
+| Local dev | **Docker Compose**: `api` + `worker` + `migrate` + `db`, healthchecks, volumes, `.env` config | `docker compose up --build` is the only prerequisite |
 | Deployment | **Render**: Web Service (api) + Background Worker (worker) from the *same image*, different start command | Matches the shared-codebase / separate-process requirement |
 
 ### Rejected alternatives (fair summary)
@@ -67,23 +68,25 @@ database. Stages are separated by clear module boundaries, not network calls.
 ```
 NewNews/
 ├── Dockerfile              # single image: ffmpeg, tesseract-ocr + eng/nep data, python deps
-├── docker-compose.yml      # api + worker + db, volumes, healthchecks
+├── docker-compose.yml      # api + worker + migrate + db, volumes, healthchecks
 ├── .env.example
 ├── pyproject.toml          # uv-managed
+├── alembic/                # migrations (versions/ generated via autogenerate)
 ├── app/
 │   ├── api/                # FastAPI routers: ingest, news, clients, events (SSE), health
 │   ├── worker/             # pipeline runner: polls jobs table, executes stages
-│   ├── pipeline/           # extraction, ai (provider iface + groq + stub), validation,
-│   │                       #   enrichment, matching, delivery
+│   ├── pipeline/           # extraction, ai (provider iface + stub, groq in M2), validation,
+│   │                       #   enrichment, matching, queue, audit, states
 │   ├── core/               # config, db sessions, logging + correlation IDs, security
-│   └── models/             # SQLAlchemy models + Alembic migrations
-├── tests/
+│   ├── models/             # SQLAlchemy models
+│   └── seed.py             # demo client + subscription bootstrap
+├── tests/                  # unit + integration (integration needs TEST_DATABASE_URL)
 ├── docs/
-│   ├── requirements.md     # (planned) scope, FRs, NFRs, acceptance criteria
-│   ├── architecture.md     # (planned) modules, data flow, interfaces, boundaries
-│   ├── data-model.md       # (planned) entities, state machine, provenance, versioning
-│   ├── roadmap.md          # (planned) milestones and status
-│   └── decisions/          # (planned) ADR-0001..0006
+│   ├── requirements.md     # scope, FRs, NFRs, acceptance criteria
+│   ├── architecture.md     # modules, data flow, interfaces, boundaries
+│   ├── data-model.md       # entities, state machine, provenance, versioning
+│   ├── roadmap.md          # milestones and status
+│   └── decisions/          # ADR-0001..0006
 ├── mobile/                 # (M5) Expo / React Native data-collection app
 └── README.md
 ```
@@ -116,28 +119,28 @@ from this budget.
 
 ## 4. Step-by-step plan (milestones)
 
-### M0 — Documentation & architecture (current phase)
+### M0 — Documentation & architecture
 - [x] Inspect repository and environment
 - [x] Verify external claims (Groq free tier, Render Docker support, FastAPI versions)
 - [x] Decide stack and record rejected alternatives
 - [x] Write README with plan and decisions
-- [ ] `docs/requirements.md`, `docs/architecture.md`, `docs/data-model.md`, `docs/roadmap.md`
-- [ ] ADRs 0001–0006 in `docs/decisions/`
-- [ ] `.gitignore`, `.env.example`
+- [x] `docs/requirements.md`, `docs/architecture.md`, `docs/data-model.md`, `docs/roadmap.md`
+- [x] ADRs 0001–0006 in `docs/decisions/`
+- [x] `.gitignore`, `.env.example`
 
 ### M1 — Runnable vertical slice (first build milestone)
-1. Install Docker Engine + Compose plugin on the host; verify `docker compose` works.
-2. Scaffold project (`uv`, FastAPI skeleton, SQLAlchemy, Alembic, config via env).
-3. `Dockerfile` (installs `ffmpeg`, `tesseract-ocr`, `tesseract-ocr-eng`, `tesseract-ocr-nep`)
-   and `docker-compose.yml` (api, worker, db + healthchecks + volumes).
-4. Data model + migration: news items, media assets, pipeline jobs, clients, subscriptions,
+1. [x] Install Docker Engine + Compose plugin on the host; verify `docker compose` works.
+2. [x] Scaffold project (`uv`, FastAPI skeleton, SQLAlchemy, Alembic, config via env).
+3. [x] `Dockerfile` (installs `ffmpeg`, `tesseract-ocr`, `tesseract-ocr-eng`, `tesseract-ocr-nep`)
+   and `docker-compose.yml` (api, worker, migrate, db + healthchecks + volumes).
+4. [x] Data model + migration: news items, media assets, pipeline jobs, clients, subscriptions,
    audit events.
-5. State machine + Postgres-backed job queue (`FOR UPDATE SKIP LOCKED`, retries, dead-letter).
-6. Ingestion API (`POST /api/v1/items`, text first) with API-key auth + correlation IDs.
-7. Pipeline stages with **stub AI provider** (deterministic heuristics) end-to-end.
-8. Client matching (topics, locations, exclusions, urgency) + REST retrieval + SSE delivery.
-9. Tests alongside each feature; `pytest` green.
-10. Verify containers build and start; exec into container and confirm `ffmpeg -version` and
+5. [x] State machine + Postgres-backed job queue (`FOR UPDATE SKIP LOCKED`, retries, dead-letter).
+6. [x] Ingestion API (`POST /api/v1/items`, text first) with API-key auth + correlation IDs.
+7. [x] Pipeline stages with **stub AI provider** (deterministic heuristics) end-to-end.
+8. [x] Client matching (topics, locations, exclusions, urgency) + REST retrieval + SSE delivery.
+9. [x] Tests alongside each feature; `pytest` green (42 tests, incl. integration against Postgres).
+10. [ ] Verify containers build and start; exec into container and confirm `ffmpeg -version` and
     `tesseract --list-langs` (including `nep`).
 
 **M1 acceptance criteria**
@@ -145,8 +148,9 @@ from this budget.
   ffmpeg/tesseract.
 - Submit a text news item via Swagger/curl → it flows through all stages → matched client
   receives it via SSE in < 2 s after eligibility.
-- Duplicate / low-confidence / failed items are routed to `duplicate` / `needs_review` /
-  `failed` — never shown as verified.
+- Duplicate submissions return the existing item (`200` + `duplicate: true`) without a second
+  pipeline run; low-confidence items go to `needs_review`; stage failures go to `failed` —
+  unverified content is never surfaced as news.
 - ffmpeg and Tesseract (with Nepali data) verified inside the container.
 - `pytest` passes; docs synchronized with implementation.
 
@@ -175,31 +179,49 @@ from this budget.
 
 ---
 
-## 5. Setup (planned commands — will be validated in M1)
+## 5. Setup (validated in M1)
 
 ```bash
 # 1. Configure environment
 cp .env.example .env        # add GROQ_API_KEY when available (optional for M1 stub mode)
 
-# 2. Build and start everything (API + worker + Postgres)
+# 2. Build and start everything (migrations run first, then API + worker + Postgres)
 docker compose up --build
 
-# 3. Verify tooling inside the container
+# 3. Verify tooling inside the container (no host installs needed)
 docker compose exec api ffmpeg -version
 docker compose exec api tesseract --list-langs   # expect: eng, nep
 
-# 4. Open interactive API docs
+# 4. Seed a demo client — prints an API key (shown once, store it)
+docker compose exec api python -m app.seed
+export KEY=nn_...   # paste the printed key
+
+# 5. Open interactive API docs
 open http://localhost:8000/docs
 
-# 5. Run tests
-docker compose exec api pytest
+# 6. Ingest a text item (202 → pipeline runs in the worker)
+curl -X POST http://localhost:8000/api/v1/items \
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+  -d '{"title":"Cabinet approves flood relief","body":"Kathmandu, 14 October 2026 — ...","source_key":"demo-1"}'
+
+# 7. Watch it arrive via SSE in < 2 s after eligibility (keep this running)
+curl -N http://localhost:8000/api/v1/events -H "Authorization: Bearer $KEY"
+
+# 8. Run the tests (unit + integration) inside the container
+docker compose exec -T db createdb -U newnews newnews_test
+docker compose exec -T -e TEST_DATABASE_URL=postgresql+psycopg://newnews:newnews@db:5432/newnews_test api pytest
+
+# Or run tests on the host against local PostgreSQL 16 (port 5432;
+# the compose DB is published on host port 5433 to avoid the conflict):
+#   TEST_DATABASE_URL=postgresql+psycopg://newnews:newnews@localhost:5432/newnews_test uv run pytest
 ```
 
 ---
 
 ## 6. Open decisions / next actions
 
-- [ ] Docker Engine installation on the host (requires sudo) — needed before M1 verification.
+- [x] Docker Engine installation on the host — done (Docker 29.1.3 + Compose 2.40.3).
+- [x] Local PostgreSQL 16 for migrations/integration tests — done (compose DB on host port 5433).
 - [ ] Provide `GROQ_API_KEY` when ready for M2 (never committed; env var only).
 - [ ] Confirm remote Postgres credentials for the M4 deployment (`DATABASE_URL`).
 - [ ] Render free-tier constraints (ephemeral disk, spin-down) accepted for the demo.
