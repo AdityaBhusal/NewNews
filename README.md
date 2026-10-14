@@ -123,6 +123,39 @@ from this budget.
 
 ## 4. Step-by-step plan (milestones)
 
+### Progress at a glance
+
+```mermaid
+flowchart TB
+    classDef done fill:#dcf5e3,stroke:#1a7f37,color:#0a3d1c
+    classDef here fill:#fff3cd,stroke:#d97706,stroke-width:2px,color:#5b3a00
+    classDef todo fill:#f1f3f5,stroke:#868e96,color:#495057
+
+    M0["<b>M0 · Docs &amp; decisions</b> — ✅ DONE<br/>requirements · architecture · data-model · roadmap<br/><b>ADR-0001</b> Python/FastAPI &nbsp;·&nbsp; <b>ADR-0002</b> PostgreSQL<br/><b>ADR-0003</b> Postgres job queue &nbsp;·&nbsp; <b>ADR-0004</b> Groq behind provider interface<br/><b>ADR-0005</b> one image, two processes &nbsp;·&nbsp; <b>ADR-0006</b> REST + SSE (not WebSockets)"]:::done
+
+    M1["<b>M1 · Runnable vertical slice</b> — ✅ DONE (verified 2026-10-14)<br/>ingest → extract → validate → enrich → match → SSE in <b>117 ms</b><br/>state machine · SKIP LOCKED queue · API-key auth · audit trail<br/><b>FR-01…FR-12</b> · 42 tests · <code>docker compose up --build</code>"]:::done
+
+    subgraph M2G["<b>M2 · Real AI + media</b> — ✅ COMPLETE (2026-10-15), 75 tests"]
+        direction LR
+        W1["<b>W1</b> Groq AI ✅<br/>structured output,<br/>TTL cache, ne↔en<br/><b>ADR-0004</b>"]:::done
+        W4["<b>W4</b> Near-dup ✅<br/>shingle + Jaccard<br/><b>FR-13</b>"]:::done
+        W5["<b>W5</b> Review queue ✅<br/>approve / reject<br/><b>FR-14</b>"]:::done
+        W23["<b>W2/W3</b> Media ✅<br/>upload + extract_media:<br/>PDF→OCR (mojibake too),<br/>image OCR, Whisper<br/><b>FR-15</b><br/>⏳ live Whisper test<br/>needs an audio clip"]:::done
+    end
+
+    M3["<b>M3 · Hardening &amp; delivery</b> — ⬜ REMAINS<br/>Postgres LISTEN/NOTIFY (replace 200 ms polling)<br/>latency harness p50/p95/p99 · operator retry workflow · dashboards"]:::todo
+
+    M4["<b>M4 · Deployment (Render)</b> — 🟡 IN PROGRESS — <b>you are here</b><br/>api deployed (newnews-t54x.onrender.com) but returns <b>502</b><br/>⬜ Render env vars (Aiven URL → postgresql+psycopg scheme)<br/>⬜ migrate-on-deploy · ⬜ worker background service<br/>⬜ ephemeral disk → S3-compatible object storage"]:::here
+
+    M5["<b>M5 · Mobile (Expo / React Native)</b> — ⬜ REMAINS<br/><code>mobile/</code> app: submit text + camera photo via ingest API<br/>combined multipart ingest (item + media in one request)"]:::todo
+
+    M0 ==> M1 ==> M2G ==> M3 ==> M4 ==> M5
+```
+
+Legend: ✅ done & verified · 🟡 in progress · ⬜ not started · ⏳ waiting on input.
+FR numbers = `docs/requirements.md` · ADR numbers = `docs/decisions/` ·
+W numbers = workstreams inside M2 · M numbers = milestones below.
+
 ### M0 — Documentation & architecture
 - [x] Inspect repository and environment
 - [x] Verify external claims (Groq free tier, Render Docker support, FastAPI versions)
@@ -144,8 +177,8 @@ from this budget.
 7. [x] Pipeline stages with **stub AI provider** (deterministic heuristics) end-to-end.
 8. [x] Client matching (topics, locations, exclusions, urgency) + REST retrieval + SSE delivery.
 9. [x] Tests alongside each feature; `pytest` green (42 tests, incl. integration against Postgres).
-10. [ ] Verify containers build and start; exec into container and confirm `ffmpeg -version` and
-    `tesseract --list-langs` (including `nep`).
+10. [x] Verify containers build and start; exec into container and confirm `ffmpeg -version` and
+    `tesseract --list-langs` (including `nep`) — verified 2026-10-14 (ffmpeg 7.1.5; eng, nep, osd).
 
 **M1 acceptance criteria**
 - `docker compose up --build` brings up healthy `api`, `worker`, `db` with no host installs of
