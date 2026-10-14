@@ -1,5 +1,7 @@
 # NewNews — AI-Powered News Intelligence Pipeline (Nepal)
 
+[![CI](https://github.com/AdityaBhusal/NewNews/actions/workflows/ci.yml/badge.svg)](https://github.com/AdityaBhusal/NewNews/actions/workflows/ci.yml)
+
 > **Status:** M1 vertical slice implemented — text ingestion → stub-AI pipeline → client
 > matching → REST + SSE delivery, with tests (42 passing against Postgres) and a Docker build.
 > M0 docs live in `docs/` (requirements, architecture, data-model, roadmap, ADRs 0001–0006).

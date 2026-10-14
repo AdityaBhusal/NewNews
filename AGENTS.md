@@ -128,6 +128,11 @@ docker compose exec -T -e TEST_DATABASE_URL=postgresql+psycopg://newnews:newnews
 sg docker -c 'docker compose ...'              # if not in docker group in current shell
 ```
 
+**CI (GitHub Actions)**: `.github/workflows/ci.yml` runs on push/PR to `main` —
+job 1: `ruff` + full `pytest` against a **postgres:17 service container** (fresh
+`newnews_test` DB); job 2: `docker build` + verifies `ffmpeg`/`tesseract (nep)` inside the
+image. Green checks = M-status visible at a glance. Keep it green (invariant 9).
+
 Endpoints: `POST/GET /api/v1/items`, `GET /api/v1/news(?ack=true)`, `GET /api/v1/items/{id}`,
 `GET /api/v1/events` (SSE), `POST /api/v1/clients` (admin), `GET /api/v1/clients/me`,
 `/healthz`, `/readyz`, `/docs`.
@@ -142,8 +147,10 @@ Endpoints: `POST/GET /api/v1/items`, `GET /api/v1/news(?ack=true)`, `GET /api/v1
 
 ## 8. Known gaps / next steps (M2+)
 
-- **M2**: Groq provider (impl in `ai/groq.py`, flip `AI_PROVIDER`; never commit the key),
-  media extraction (PDF/OCR/Whisper → `media_assets`), near-dup detection, review queue
+- **M2 plan approved (D1–D14 recommendations pending user confirmation)**: Groq provider
+  (`ai/groq.py`, flip `AI_PROVIDER`; **`GROQ_API_KEY` already in local `.env` — never commit
+  it**), media extraction (PDF/OCR/Whisper → `media_assets`), near-dup detection (0.85 Jaccard
+  → activates `duplicate` state + `is_duplicate_of`), review queue (admin approve/reject)
 - **M3**: LISTEN/NOTIFY, latency harness p50/p95/p99 (data already in `eligible_at`/
   `delivered_at`), dashboards
 - **M4**: Render blueprint, remote Postgres, ephemeral-disk limitation (S3)

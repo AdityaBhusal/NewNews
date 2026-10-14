@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-test:
+    name: Lint & tests (unit + integration)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: newnews
+          POSTGRES_PASSWORD: newnews
+          POSTGRES_DB: newnews_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U newnews -d newnews_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+    env:
+      TEST_DATABASE_URL: postgresql+psycopg://newnews:newnews@localhost:5432/newnews_test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install Python 3.13 + dependencies
+        run: |
+          uv python install 3.13
+          uv sync --locked
+
+      - name: Lint (ruff)
+        run: uv run ruff check .
+
+      - name: Tests (42: unit + Postgres integration)
+        run: uv run pytest
+
+  docker:
+    name: Docker image build & media tooling
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t newnews:ci .
+
+      - name: Verify ffmpeg inside image
+        run: docker run --rm newnews:ci ffmpeg -version
+
+      - name: Verify Tesseract + Nepali data inside image
+        run: docker run --rm newnews:ci tesseract --list-langs
