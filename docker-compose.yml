@@ -33,6 +33,8 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql+psycopg://newnews:newnews@db:5432/newnews
+    volumes:
+      - media_data:/data/media
     ports:
       - "8000:8000"
     depends_on:
@@ -53,6 +55,8 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql+psycopg://newnews:newnews@db:5432/newnews
+    volumes:
+      - media_data:/data/media   # shared with api: uploads are extracted here
     depends_on:
       db:
         condition: service_healthy
@@ -69,3 +73,4 @@ services:
 
 volumes:
   pgdata:
+  media_data:

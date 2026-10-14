@@ -25,6 +25,7 @@ _EXTRAS = (
     "method",
     "path",
     "code",
+    "error",
 )
 
 

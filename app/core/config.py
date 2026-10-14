@@ -29,6 +29,15 @@ class Settings(BaseSettings):
     groq_api_key: str = ""
     groq_model: str = "openai/gpt-oss-120b"
     groq_stt_model: str = "whisper-large-v3"
+    # Free-tier TPM for gpt-oss-120b is 8 000 tokens (~0.63 tok/char worst case
+    # for Nepali/mojibake text) — an unbounded body once blew the limit (413).
+    ai_max_input_chars: int = 8000
+
+    # --- Media (W2/W3) — media_root + groq_stt_model already defined above ---
+    media_max_bytes: int = 20 * 1024 * 1024  # 20 MB per upload
+    media_ocr_languages: str = "nep+eng"  # tesseract -l langs (data baked into image)
+    media_pdf_text_min_chars: int = 50  # below this per doc -> treat as scanned, OCR it
+    media_pdf_max_pages: int = 8  # OCR/render cap for huge scanned documents
 
     # --- Pipeline tuning ---
     credibility_verified_threshold: float = 0.75

@@ -20,5 +20,9 @@ def get_provider() -> AIProvider:
             raise ValueError("AI_PROVIDER=groq requires GROQ_API_KEY to be set")
         from app.pipeline.ai.groq import GroqProvider
 
-        return GroqProvider(settings.groq_api_key, model=settings.groq_model)
+        return GroqProvider(
+            settings.groq_api_key,
+            model=settings.groq_model,
+            stt_model=settings.groq_stt_model,
+        )
     raise ValueError(f"unknown AI provider: {settings.ai_provider!r} (expected 'stub' or 'groq')")

@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 
 from openai import AsyncOpenAI
 
+from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.pipeline.ai.base import (
     STATUS_LIKELY,
@@ -118,10 +119,12 @@ class GroqProvider:
         api_key: str,
         model: str = DEFAULT_MODEL,
         *,
+        stt_model: str = "whisper-large-v3",
         base_url: str = "https://api.groq.com/openai/v1",
     ) -> None:
         self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
         self._model = model
+        self._stt_model = stt_model
         self._cache: dict[str, tuple[float, _Analysis]] = {}
 
     # --- core: one call, many views --------------------------------------
@@ -137,7 +140,7 @@ class GroqProvider:
             model=self._model,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": f"TEXT:\n{text[:24000]}"},
+                {"role": "user", "content": f"TEXT:\n{text[:get_settings().ai_max_input_chars]}"},
             ],
             response_format={"type": "json_schema", "json_schema": ANALYSIS_SCHEMA},
             temperature=0.2,
@@ -198,6 +201,19 @@ class GroqProvider:
         a = await self._analyze(text)
         return a.locations
 
+    # --- speech-to-text (W3 media extraction; not part of the AIProvider
+    # protocol — media_extract discovers it with `getattr`, so the stub simply
+    # has no transcription and reports a clean per-asset error instead).
+
+    async def transcribe(self, path: str) -> str:
+        """Groq Whisper transcription of a local audio file (mp3/wav/m4a/...)."""
+        with open(path, "rb") as fh:
+            response = await self._client.audio.transcriptions.create(
+                model=self._stt_model,
+                file=fh,
+            )
+        return (response.text or "").strip()
+
     async def translate(self, text: str, source_language: str, target_language: str) -> str:
         response = await self._client.chat.completions.create(
             model=self._model,
@@ -210,7 +226,7 @@ class GroqProvider:
                         "numbers. Output ONLY the translation, no quotes or commentary."
                     ),
                 },
-                {"role": "user", "content": text[:12000]},
+                {"role": "user", "content": text[: get_settings().ai_max_input_chars]},
             ],
             temperature=0.1,
         )

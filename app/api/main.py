@@ -7,7 +7,7 @@ import time
 from fastapi import FastAPI
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from app.api.routers import clients, events, health, ingest, news, review
+from app.api.routers import clients, events, health, ingest, media, news, review
 from app.core.config import get_settings
 from app.core.context import get_correlation_id, new_correlation_id, set_correlation_id
 from app.core.logging import get_logger, setup_logging
@@ -81,6 +81,7 @@ def create_app() -> FastAPI:
 
     application.include_router(health.router)
     application.include_router(ingest.router, prefix=settings.api_prefix)
+    application.include_router(media.router, prefix=settings.api_prefix)
     application.include_router(news.router, prefix=settings.api_prefix)
     application.include_router(clients.router, prefix=settings.api_prefix)
     application.include_router(events.router, prefix=settings.api_prefix)

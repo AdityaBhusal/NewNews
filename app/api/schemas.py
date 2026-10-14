@@ -29,6 +29,19 @@ class ItemCreate(BaseModel):
     media: list[MediaIn] = Field(default_factory=list)
 
 
+class MediaOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    item_id: str
+    kind: str
+    filename: str | None
+    mime_type: str | None
+    size_bytes: int | None
+    extraction_status: str
+    created_at: datetime
+
+
 class ItemAccepted(BaseModel):
     id: str
     status: str

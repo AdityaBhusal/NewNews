@@ -7,12 +7,13 @@ from collections.abc import Awaitable, Callable
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import NewsItem
-from app.pipeline import dedupe, enrichment, extraction, matching, validation
+from app.pipeline import dedupe, enrichment, extraction, matching, media_extract, validation
 from app.pipeline.ai.base import AIProvider
 
 StageHandler = Callable[[AsyncSession, NewsItem, AIProvider], Awaitable[str | None]]
 
 STAGE_HANDLERS: dict[str, StageHandler] = {
+    "extract_media": media_extract.run,
     "extract": extraction.run,
     "dedupe": dedupe.run,
     "validate": validation.run,
@@ -22,7 +23,14 @@ STAGE_HANDLERS: dict[str, StageHandler] = {
 
 # Ordered pipeline; a handler's return value picks the next stage explicitly,
 # this constant is for validation/reporting only.
-STAGE_ORDER: tuple[str, ...] = ("extract", "dedupe", "validate", "enrich", "match")
+STAGE_ORDER: tuple[str, ...] = (
+    "extract_media",
+    "extract",
+    "dedupe",
+    "validate",
+    "enrich",
+    "match",
+)
 
 FIRST_STAGE = STAGE_ORDER[0]
 
