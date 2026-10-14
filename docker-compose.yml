@@ -1,0 +1,71 @@
+name: newnews
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: newnews
+      POSTGRES_PASSWORD: newnews
+      POSTGRES_DB: newnews
+    ports:
+      - "5433:5432"   # host 5432 is taken by the local PostgreSQL installed for tests
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U newnews -d newnews"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  migrate:
+    build: .
+    command: alembic upgrade head
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://newnews:newnews@db:5432/newnews
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    build: .
+    command: uvicorn app.api.main:app --host 0.0.0.0 --port 8000
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://newnews:newnews@db:5432/newnews
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  worker:
+    build: .
+    command: python -m app.worker
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://newnews:newnews@db:5432/newnews
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    # Worker has no HTTP port — liveness = PID 1 (python -m app.worker) alive.
+    healthcheck:
+      test: ["CMD-SHELL", "kill -0 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  pgdata:
