@@ -1,0 +1,44 @@
+[project]
+name = "newnews"
+version = "0.1.0"
+description = "NewNews — AI-powered news intelligence pipeline (Nepal)"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.143.0",
+    "uvicorn[standard]>=0.34.0",
+    "sqlalchemy[asyncio]>=2.0.36",
+    "psycopg[binary]>=3.2.0",
+    "alembic>=1.14.0",
+    "pydantic-settings>=2.7.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.25.0",
+    "httpx>=0.28.0",
+    "ruff>=0.9.0",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+# Generated Alembic migrations keep alembic's own formatting.
+exclude = ["alembic/versions"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+# B008: `Depends(...)` / `Header(...)` in argument defaults is the idiomatic
+# FastAPI pattern (FastAPI's own docs recommend ignoring it).
+ignore = ["B008"]

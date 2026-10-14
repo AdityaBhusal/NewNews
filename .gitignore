@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# uv
+uv.lock.bak
+
+# Env / secrets
+.env
+.env.local
+
+# Local data & media
+/data/
+*.db
+*.sqlite3
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Logs / coverage
+*.log
+.coverage
+htmlcov/
+
+# Node / Expo (mobile/, M5)
+node_modules/
+mobile/.expo/
+mobile/dist/
