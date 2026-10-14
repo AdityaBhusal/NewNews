@@ -6,7 +6,7 @@ implementation in `app/` (endpoints, thresholds, and status names below match th
 
 ## 1. Scope
 
-NewNews ingests raw news items (text first; media in M2), processes them through a staged
+NewNews ingests raw news items (text first; media since M2 — FR-15), processes them through a staged
 pipeline, assesses credibility with an AI provider, enriches them with structured metadata,
 matches them against configured client subscriptions, and pushes eligible items to clients over
 REST and Server-Sent Events. Every item carries a correlation ID, a state machine status, and a
@@ -22,7 +22,7 @@ minting keys.
 |---|---|---|
 | FR-01 | **Idempotent ingestion with API-key auth** | `POST /api/v1/items` requires a client key (`Authorization: Bearer …` or `X-API-Key`; else 401). Payload: `title?`, `body`, `source_key`, `source?`, `language?`, `media[]`. Content hash = SHA-256 over normalized (lowercased, whitespace-collapsed) title+body. New item → **202** with `duplicate: false`; identical `(source_key, content_hash)` → **200** with `duplicate: true` and the existing id. A concurrent-duplicate race is resolved via the unique constraint + `IntegrityError` fallback. |
 | FR-02 | **Item state machine** | Ten states (`received, processing, validated, enriched, eligible, delivered, duplicate, needs_review, rejected, failed`); transitions validated in `app/pipeline/states.py` (illegal move raises `InvalidTransition`). Entering `eligible` / `delivered` stamps `eligible_at` / `delivered_at`. Terminal: `delivered`, `duplicate`, `rejected`, `failed`. Editorial decisions (M2): `needs_review` → `validated` (approve) / `rejected` (reject). |
-| FR-03 | **Text extraction (M1 text path)** | Whitespace normalization; script-based language detection (≥ 30 % Devanagari → `ne`, else `en`) when not supplied; empty body → item `failed` with audit event `extraction_failed` (job still succeeds — no crash). Media extraction (PDF/OCR/transcription) is M2. |
+| FR-03 | **Text extraction (M1 text path)** | Whitespace normalization; script-based language detection (≥ 30 % Devanagari → `ne`, else `en`) when not supplied; empty body → item `failed` with audit event `extraction_failed` (job still succeeds — no crash). Media extraction (PDF/OCR/transcription) is the separate `extract_media` first stage — FR-15. |
 | FR-04 | **Stub AI credibility assessment with rationale** | `assess_credibility` returns score (0–1), confidence (0–1), status label (`likely_credible` / `uncertain` / `unlikely_credible`) and a list of human-readable rationale strings, all persisted on the item. Routing: score ≥ `CREDIBILITY_VERIFIED_THRESHOLD` (**0.75**) **and** confidence ≥ `MIN_ROUTING_CONFIDENCE` (**0.4**, hardcoded) → `validated`, else `needs_review`. Items in `needs_review` never receive delivery rows. |
 | FR-05 | **Enrichment: topics, locations, urgency, summary** | `classify` → `topics` (JSONB) + `urgency` (`low`/`normal`/`high`), `detect_locations` → `locations` (JSONB), `summarize` → `summary`. No topics **and** no locations → `needs_review` (nothing to match against), else `enriched`. |
 | FR-06 | **Client matching rules** | For each active subscription of an active client: excluded topics win (any intersection → no match); empty `topics` / `locations` on the subscription = match-everything on that axis; item urgency rank must be ≥ `min_urgency` (`low=0 < normal=1 < high=2`). Each match creates one `deliveries` row; re-running the stage does not double-create rows. An item with zero matches still becomes `eligible` (documented in tests). |
@@ -34,6 +34,7 @@ minting keys.
 | FR-12 | **Health probes** | `GET /healthz` (liveness) and `GET /readyz` (readiness: `SELECT 1`, 503 on failure) are unauthenticated; used by Compose/Docker healthchecks. |
 | FR-13 | **Near-duplicate detection (M2)** | Stage `dedupe` runs between `extract` and `validate`: token 3-gram shingle sets + Jaccard over recent items (`NEARDUP_*` settings: window 90 d, candidates ≤ 2000, suspect 0.6, hard 0.85). Score ≥ 0.85 → `processing` → `duplicate` with `is_duplicate_of` linked to the canonical item + audit `near_duplicate`; 0.6–0.85 → audit `near_duplicate_suspect`, pipeline continues. Score = max(body-only, title+body) similarity so reworded headlines don't hide matching copy. |
 | FR-14 | **Editorial review queue (M2)** | Admin-only (`require_admin`): `GET /api/v1/review` lists `needs_review` items; `GET /api/v1/review/{id}` returns the item + full audit timeline; `POST …/approve` (`note?`) → `needs_review` → `validated` and the pipeline resumes at **enrich** (re-scoring would not change; the editor's verdict *is* validation); `POST …/reject` (`reason` required) → terminal `rejected`. Every decision is audited; wrong state → 409; non-admin → 403. |
+| FR-15 | **Media upload & extraction (M2)** | `POST /api/v1/items/{id}/media` (multipart file, client-key auth): accepted only while the item is `received` (else 409), ≤ `MEDIA_MAX_BYTES` (413), recognised MIME/extension else 415; stored under `MEDIA_ROOT/{item_id}/` with a `media_assets` row (`extraction_status=pending`, audit `media_attached`). `extract_media` is the pipeline's **FIRST_STAGE** (pass-through when nothing is attached): images → Tesseract OCR (`nep+eng`), PDFs → pypdf text layer with OCR fallback when the layer is missing *or* is custom-font mojibake (code-punctuation density > 3 % — Preeti/Krutidev-style fonts), audio/video → Groq Whisper (ffmpeg pulls audio from video first). Extracted text is stored on the asset and appended once to the item body under a `[filename — extracted text]` marker so dedupe and the AI assessment see it; per-asset failure sets `extraction_status=error` and the item continues without it. |
 
 ## 3. Non-functional requirements
 
@@ -70,9 +71,9 @@ see `docs/data-model.md` §8.
 
 | Not in M1 | Target |
 |---|---|
-| Real Groq provider (summaries, classification, translation ne ↔ en, Whisper transcription) | M2 — ✅ text path landed 2026-10-14 (Whisper still pending) |
-| Media extraction: PDF text, image OCR (Tesseract), audio/video transcription; media stored in Postgres + `/data/media` volume only | M2 |
-| Near-duplicate detection (fuzzy similarity beyond exact content hash); review-queue workflow for `needs_review` items | M2 — ✅ both landed 2026-10-14 |
+| Real Groq provider (summaries, classification, translation ne ↔ en, Whisper transcription) | M2 — ✅ complete 2026-10-15 (text path 10-14; Whisper via `transcribe()` wired to `extract_media`) |
+| Media extraction: PDF text, image OCR (Tesseract), audio/video transcription; media stored on a `/data/media` volume | M2 — ✅ landed 2026-10-15 (FR-15; Render free tier disk is ephemeral → M4 object storage) |
+| Near-duplicate detection (fuzzy similarity beyond exact content hash); review-queue workflow for `needs_review` items | M2 — ✅ both landed 2026-10-15 |
 | Postgres `LISTEN/NOTIFY` cross-process notify (M1 uses 200 ms polling); retry/backoff tuning and latency measurement harness (p50/p95/p99) | M3 |
 | Deployment (Render Blueprint, remote Postgres, secrets); S3-compatible object storage | M4 |
 | Mobile data-collection app (`mobile/`, Expo / React Native) | M5 |

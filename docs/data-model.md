@@ -62,12 +62,15 @@ Relationship: `media` → `media_assets` (cascade delete).
 | `mime_type` | `VARCHAR(100)`, nullable | |
 | `size_bytes` | `INTEGER`, nullable | ≥ 0 |
 | `media_metadata` | `JSONB`, default `{}` | |
-| `extraction_status` | `VARCHAR(16)`, default `pending` | Populated by M2 extraction stages |
-| `extracted_text` | `TEXT`, nullable | Populated by M2 |
-| `error` | `TEXT`, nullable | Populated by M2 |
+| `extraction_status` | `VARCHAR(16)`, default `pending` | `pending` → `extracted` \| `error`, set by the `extract_media` stage (W3) |
+| `extracted_text` | `TEXT`, nullable | Output of PDF text / OCR / Whisper; a copy is also appended once to `news_items.body` under `[filename — extracted text]` so later stages see it |
+| `error` | `TEXT`, nullable | Failure message when `extraction_status=error` — the item continues without that asset |
 | `created_at` / `updated_at` | `TIMESTAMPTZ` | |
 
-In M1 assets are registered at ingestion but never processed (text-only pipeline).
+Assets arrive two ways: as `media[]` metadata at ingestion (URLs, no file bytes), or as real
+files via `POST /api/v1/items/{id}/media` while the item is `received` (stored under
+`MEDIA_ROOT/{item_id}/` on the shared api/worker volume). The `extract_media` first stage
+drains every `pending` asset (multiple assets per item are joined with their labels).
 
 ## 3. `pipeline_jobs` — the Postgres job queue
 

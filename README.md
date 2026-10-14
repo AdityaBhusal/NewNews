@@ -2,10 +2,11 @@
 
 [![CI](https://github.com/AdityaBhusal/NewNews/actions/workflows/ci.yml/badge.svg)](https://github.com/AdityaBhusal/NewNews/actions/workflows/ci.yml)
 
-> **Status:** M1 vertical slice verified (42 tests, live SSE in 117 ms) · M2 in progress —
-> **Groq AI provider, near-duplicate detection, and the editorial review queue landed**
-> (61 tests). Remaining: media extraction (PDF/OCR/Whisper).
-> M0 docs live in `docs/` (requirements, architecture, data-model, roadmap, ADRs 0001–0006).
+> **Status:** M1 vertical slice verified · **M2 complete** (Groq AI, near-dup, review queue,
+> media upload/OCR/Whisper — 73 tests green, live E2E: Nepali newspaper scan → mojibake
+> detected → OCR → Groq → `needs_review` → approved → Nepali summary → `eligible`).
+> Next: M4 Render deployment. M0 docs live in `docs/` (requirements, architecture,
+> data-model, roadmap, ADRs 0001–0006).
 
 NewNews is a prototype news-intelligence platform that accepts raw news/media (text, images,
 audio, video, documents), extracts and processes its content, assesses credibility, enriches it
@@ -165,8 +166,12 @@ from this budget.
   stage (≥ 0.85 → `duplicate` with `is_duplicate_of`, 0.6–0.85 flagged `near_duplicate_suspect`).
 - [x] Review-queue workflow: admin `GET /api/v1/review`, item detail with audit timeline,
   approve (resumes at enrichment) / reject (terminal `rejected`, reason audited).
-- [ ] PDF text extraction; image OCR (Tesseract); audio/video transcription (Groq Whisper);
-  `POST /api/v1/items/{id}/media` upload endpoint.
+- [x] PDF text extraction; image OCR (Tesseract); audio/video transcription (Groq Whisper);
+  `POST /api/v1/items/{id}/media` upload endpoint. **Done** — `extract_media` is the new
+  FIRST_STAGE (PDF text layer → OCR fallback for scans and custom-font mojibake; images OCR
+  with `nep+eng`; audio/video transcribed via Whisper when `AI_PROVIDER=groq`). Live-verified:
+  screenshot → Unicode Devanagari; 12 MB Gorkhapatra PDF → mojibake detected → OCR →
+  133 K chars clean Devanagari → Groq → `needs_review` → approved → Nepali summary → `eligible`.
 
 ### M3 — Hardening & delivery
 - Retry/backoff, dead-letter handling, partial-failure semantics.

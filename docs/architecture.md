@@ -19,10 +19,13 @@ service; only the command differs (see ADR-0005).
 
 ```
  POST /api/v1/items ──► news_items(status=received) + audit(received)
-                        + pipeline_jobs(stage=extract, pending)
-        │
+                        + pipeline_jobs(stage=extract_media, pending)
+        │   POST /api/v1/items/{id}/media (while received) ──► media_assets(pending)
         ▼   worker loop (claim FOR UPDATE SKIP LOCKED; idle poll 200 ms)
 
+  extract_media ──► (pass-through if no assets; else PDF text / OCR / Whisper
+       │             appended to the body — status stays `received`)
+       ▼
   extract ──► dedupe ──► validate ──► enrich ──► match
      │           │           │           │          │
  processing   duplicate    validated   enriched    eligible
@@ -49,7 +52,7 @@ is `dead` and the item becomes `failed`.
 | Concern | `api` process | `worker` process |
 |---|---|---|
 | Entry point | `app/api/main.py` (`create_app`) | `app/worker/main.py` (`main`, `python -m app.worker`) |
-| Does | HTTP validation, auth, ingestion (writes `news_items` + first job), REST/SSE delivery, admin, review queue, health | Claims jobs, runs `extract/dedupe/validate/enrich/match`, retries, dead-letters |
+| Does | HTTP validation, auth, ingestion (writes `news_items` + first job), media upload (writes `media_assets` + files under `MEDIA_ROOT`), REST/SSE delivery, admin, review queue, health | Claims jobs, runs `extract_media/extract/dedupe/validate/enrich/match`, retries, dead-letters |
 | Does **not** | Run pipeline stages | Serve HTTP; the SSE/REST paths live only in `api` |
 | Shared | `app/core` (config, db, logging, security, context), `app/models`, `app/pipeline` — same code, same image |
 | Scaling | Uvicorn process(es) | Multiple workers are safe: `SKIP LOCKED` claims are exclusive; `worker_id = hostname:pid` |
@@ -63,6 +66,7 @@ rows (worker → api). M1 notify is polling; M3 upgrades it to `LISTEN/NOTIFY` (
 |---|---|
 | `app/api/main.py` | App factory, router mounting (`/api/v1` prefix), `RequestContextMiddleware` (pure ASGI) |
 | `app/api/routers/ingest.py` | `POST /api/v1/items` — idempotent ingestion, dedupe + race handling, enqueues first stage |
+| `app/api/routers/media.py` | `POST /api/v1/items/{id}/media` — multipart upload while `received` (409/413/415 guards, MIME→kind dispatch, audit `media_attached`) |
 | `app/api/routers/news.py` | `GET /api/v1/news` (pull feed + `ack`), `GET /api/v1/items/{id}` (detail) |
 | `app/api/routers/events.py` | `GET /api/v1/events` — SSE stream, `Last-Event-ID` resume, heartbeats, delivery → `sent` |
 | `app/api/routers/clients.py` | `POST /api/v1/clients` (admin mint), `GET /api/v1/clients/me` |
@@ -79,12 +83,13 @@ rows (worker → api). M1 notify is polling; M3 upgrades it to `LISTEN/NOTIFY` (
 | `app/pipeline/states.py` | `ItemStatus`, transition table, `transition()`, terminal states |
 | `app/pipeline/hashing.py` | Text normalization + content hash (idempotency key) |
 | `app/pipeline/extraction.py` | Stage `extract`: normalize body, language detection, empty-body → `failed` |
+| `app/pipeline/media_extract.py` | Stage `extract_media` (**FIRST_STAGE**): PDF text (pypdf) with OCR fallback for scans/custom-font mojibake, image OCR (Tesseract `nep+eng`), audio/video transcription (Groq Whisper, ffmpeg for video) |
 | `app/pipeline/dedupe.py` | Stage `dedupe`: shingle/Jaccard near-duplicate check → `duplicate` (links `is_duplicate_of`) or `near_duplicate_suspect` audit (M2 W4) |
 | `app/pipeline/validation.py` | Stage `validate`: credibility assessment + routing thresholds |
 | `app/pipeline/enrichment.py` | Stage `enrich`: topics, locations, urgency, summary |
 | `app/pipeline/matching.py` | Stage `match`: pure `subscription_matches()` rule + delivery fan-out |
 | `app/pipeline/queue.py` | `enqueue_job`, `claim_job` (`FOR UPDATE SKIP LOCKED`), `reschedule_job` |
-| `app/pipeline/runner.py` | Stage registry (`extract/dedupe/validate/enrich/match`), `STAGE_ORDER`, `FIRST_STAGE` |
+| `app/pipeline/runner.py` | Stage registry (`extract_media/extract/dedupe/validate/enrich/match`), `STAGE_ORDER`, `FIRST_STAGE` |
 | `app/pipeline/audit.py` | `record_audit()` — one audit row per stage outcome |
 | `app/pipeline/ai/base.py` | `AIProvider` protocol + `CredibilityAssessment` / `Classification` dataclasses, urgency ranks |
 | `app/pipeline/ai/stub.py` | Deterministic heuristic provider (offline, explainable) |

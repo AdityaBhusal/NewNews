@@ -5,9 +5,10 @@
 > endpoint, new setting, decisions reversed). If this file and the code disagree, the code
 > wins — then fix this file.
 
-**Status (2026-10-15): M1 complete & verified; M2 in progress — W1 (Groq), W4 (near-dup),
-W5 (review queue) landed.** Next: W2/W3 media upload & extraction (samples/ has a screenshot
-+ scanned PDF; audio clip still pending from user).
+**Status (2026-10-15): M1 complete & verified; M2 COMPLETE — W1 (Groq), W4 (near-dup),
+W5 (review queue), W2/W3 (media upload + extraction) all landed.** Next: M4 Render
+deployment (service exists at newnews-t54x.onrender.com but 502 — env vars / migrate /
+worker service still pending); Whisper E2E still awaits an audio clip from the user.
 Full plan: `README.md` §4 · Detailed docs: `docs/` (requirements, architecture, data-model,
 roadmap, decisions/ADR-0001..0006).
 
@@ -30,7 +31,12 @@ decisions are separate.
   compose `db` service (postgres:17) published on host port **5433** (5432 was taken)
 - Job queue = Postgres table + `FOR UPDATE SKIP LOCKED` (no Redis/Celery — ADR-0003)
 - AI: provider interface (`app/pipeline/ai/base.py`) + deterministic **stub** (default);
-  Groq (OpenAI-compatible) arrives in M2 via `AI_PROVIDER=groq` config switch (ADR-0004)
+  Groq (OpenAI-compatible) landed M2 W1 via `AI_PROVIDER=groq` (ADR-0004) — 1 structured
+  json_schema call per text + TTL cache + Whisper `transcribe()` for media audio;
+  **`AI_MAX_INPUT_CHARS=8000`** guards the free-tier 8 K TPM (a 576 K-char body once 413'd)
+- Media (M2 W2/W3): pypdf text layer (fonttools for CFF encodings) + pypdfium2 render →
+  Tesseract `nep+eng` OCR → Groq Whisper (ffmpeg for video); files on a shared
+  api/worker `media_data` volume at `MEDIA_ROOT` (ephemeral on Render → M4 object storage)
 - Delivery: SSE (`/api/v1/events`) with 200 ms DB polling (M3 → LISTEN/NOTIFY) + REST pull
 - Docker: single image for `api` / `worker` / `migrate` (ffmpeg + tesseract eng/nep baked in)
 - uv manages deps (`uv sync`), ruff lints (generated `alembic/versions` excluded)
@@ -47,8 +53,8 @@ app/
 │   │                      #   BaseHTTPMiddleware — that would buffer SSE streams!)
 │   ├── schemas.py         # Pydantic req/resp models (ItemOut uses from_attributes)
 │   ├── deps.py            # auth: Bearer or X-API-Key → Client; X-Admin-Key → admin
-│   └── routers/           # health(/healthz,/readyz), ingest, news, clients, events(SSE),
-│                          #   review(admin: queue/approve/reject)
+│   └── routers/           # health(/healthz,/readyz), ingest, media(POST items/{id}/media),
+│                          #   news, clients, events(SSE), review(admin: queue/approve/reject)
 ├── core/                  # config.py (Settings, lru_cache get_settings), db.py (engine,
 │                          #   SessionLocal, get_session dep, session_scope), logging.py
 │                          #   (JSON logs), context.py (correlation-id contextvar),
@@ -59,6 +65,10 @@ app/
 │   ├── hashing.py         # normalize (lower+collapse ws) → sha256 title+body
 │   ├── extraction.py      # received→processing; empty body → failed; lang detect (≥30%
 │   │                      #   Devanagari → "ne"); next stage = dedupe
+│   ├── media_extract.py   # FIRST_STAGE extract_media (status unchanged): PDF text (pypdf)
+│   │                      #   → OCR fallback for scans + custom-font mojibake (density >3%),
+│   │                      #   image OCR (nep+eng), audio/video → Groq Whisper; text appended
+│   │                      #   once to body under "[file — extracted text]"
 │   ├── dedupe.py          # processing→duplicate (shingle 3-gram Jaccard ≥ NEARDUP_THRESHOLD
 │   │                      #   0.85 → is_duplicate_of linked) or near_duplicate_suspect audit
 │   │                      #   (0.6–0.85); body-first scoring; window/limit from settings
@@ -69,20 +79,22 @@ app/
 │   ├── matching.py        # pure subscription_matches() + →eligible, creates Deliveries
 │   ├── queue.py           # enqueue_job (max_attempts from settings), claim_job
 │   │                      #   (FOR UPDATE SKIP LOCKED), reschedule_job
-│   ├── runner.py          # STAGE_HANDLERS registry: extract→dedupe→validate→enrich→match
+│   ├── runner.py          # STAGE_HANDLERS registry: extract_media→extract→dedupe→
+│   │                      #   validate→enrich→match; FIRST_STAGE = extract_media
 │   ├── audit.py           # record_audit() helper
 │   └── ai/                # base.py (Protocol + dataclasses + STATUS_* + URGENCY_RANK),
 │                          #   stub.py (lexicons, explainable heuristics), groq.py (real
 │                          #   LLM: 1 structured json_schema call/text + TTL cache +
-│                          #   translate), factory.py
+│                          #   translate + Whisper transcribe), factory.py
 ├── worker/main.py         # claim → handler → next stage; retry w/ exp backoff
 │                          #   (base JOB_RETRY_BASE_SECONDS), dead-letter → item failed;
 │                          #   seeds correlation contextvar from item; drain() for tests
 ├── models/                # item.py (NewsItem+MediaAsset), job.py, client.py (Client,
 │                          #   Subscription, Delivery), audit.py, base.py (Base+timestamps)
 └── seed.py                # python -m app.seed → demo client, prints key ONCE
-tests/                     # conftest (db schema-per-test, api, admin_headers fixtures),
-                           #   12 modules; integration needs TEST_DATABASE_URL else skips
+tests/                     # conftest (db schema-per-test, api, admin_headers fixtures,
+                           #   make_pdf_bytes PDF builder), 14 modules; integration needs
+                           #   TEST_DATABASE_URL else skips; OCR tests skip without tesseract
 alembic/                   # env.py reads settings.database_url; initial rev applied
 docs/                      # requirements, architecture, data-model, roadmap, ADRs
 ```
@@ -123,11 +135,13 @@ docs/                      # requirements, architecture, data-model, roadmap, AD
 ## 5. Config (env / `.env`, defaults in `app/core/config.py`)
 
 `DATABASE_URL` · `ADMIN_API_KEY` · `AI_PROVIDER=stub|groq` · `GROQ_API_KEY` ·
+`GROQ_MODEL` · `GROQ_STT_MODEL=whisper-large-v3` · `AI_MAX_INPUT_CHARS=8000` ·
 `CREDIBILITY_VERIFIED_THRESHOLD=0.75` · `CREDIBILITY_REVIEW_THRESHOLD=0.45` ·
 `NEARDUP_THRESHOLD=0.85` · `NEARDUP_SUSPECT_THRESHOLD=0.6` · `NEARDUP_WINDOW_DAYS=90` ·
 `NEARDUP_CANDIDATE_LIMIT=2000` · `JOB_MAX_ATTEMPTS=3` · `JOB_RETRY_BASE_SECONDS=5` ·
 `WORKER_POLL_INTERVAL_MS=200` · `SSE_POLL_INTERVAL_MS=200` · `MEDIA_ROOT=/data/media` ·
-`TEST_DATABASE_URL` (tests only).
+`MEDIA_MAX_BYTES=20971520` · `MEDIA_OCR_LANGUAGES=nep+eng` ·
+`MEDIA_PDF_TEXT_MIN_CHARS=50` · `MEDIA_PDF_MAX_PAGES=8` · `TEST_DATABASE_URL` (tests only).
 
 ## 6. Commands
 
@@ -148,28 +162,36 @@ job 1: `ruff` + full `pytest` against a **postgres:17 service container** (fresh
 `newnews_test` DB); job 2: `docker build` + verifies `ffmpeg`/`tesseract (nep)` inside the
 image. Green checks = M-status visible at a glance. Keep it green (invariant 9).
 
-Endpoints: `POST/GET /api/v1/items`, `GET /api/v1/news(?ack=true)`, `GET /api/v1/items/{id}`,
+Endpoints: `POST/GET /api/v1/items`, `POST /api/v1/items/{id}/media` (multipart, must be
+`received`), `GET /api/v1/news(?ack=true)`, `GET /api/v1/items/{id}`,
 `GET /api/v1/events` (SSE), `POST /api/v1/clients` (admin), `GET /api/v1/clients/me`,
 `GET /api/v1/review` + `GET/POST /api/v1/review/{id}(|approve|reject)` (admin),
 `/healthz`, `/readyz`, `/docs`.
 
-## 7. Verified facts (2026-10-14 run; re-verify if env changes)
+## 7. Verified facts (2026-10-15 run; re-verify if env changes)
 
-- `docker compose ps` → api/worker/db healthy, migrate exit 0
-- ffmpeg 7.1.5 + tesseract `eng, nep, osd` inside container
-- 61 tests green on host; ruff clean (42 in M1 + 7 for Groq: 3 offline parser tests + 4 live
-  tests that auto-skip without GROQ_API_KEY + 12 for dedupe/review incl. 2 state tests)
-- Live E2E: eligible→SSE receipt measured **117 ms** (budget < 2 s)
+- `docker compose ps` → api/worker/db healthy, migrate exit 0; shared `media_data` volume
+  mounted on api+worker at `/data/media`
+- ffmpeg 7.1.5 + tesseract `eng, nep, osd` inside container (host has **no** tesseract/ffmpeg
+  → those 2 OCR tests skip on host and pass in-container)
+- 75 tests total: 73 pass + 2 OCR-skip on host with `TEST_DATABASE_URL`; ruff clean
+  (42 M1 + 7 Groq + 12 dedupe/review + 14 media W2/W3)
+- Live E2E M1: eligible→SSE receipt measured **117 ms** (budget < 2 s)
+- Live E2E M2 media: screenshot PNG → Unicode Devanagari OCR (753 chars); 12.4 MB Gorkhapatra
+  PDF (Preeti/custom-font layer → mojibake) → OCR → 133 K chars clean Devanagari → `ne` →
+  Groq → `needs_review` → admin approve → Nepali summary + topics → `eligible`
+- Groq free tier `openai/gpt-oss-120b` = **8 K TPM** → requests must stay under
+  `AI_MAX_INPUT_CHARS=8000` (observed 413 at ~15 K tokens → dead-letter)
 - Host PG16 (5432) vs compose PG (5433) — don't cross them
 
-## 8. Known gaps / next steps (M2+)
+## 8. Known gaps / next steps (M3+)
 
-- **M2 remaining — W2/W3 media**: `POST /api/v1/items/{id}/media` upload, PDF text (pypdf),
-  image OCR (Tesseract eng+nep — verified in image), Groq Whisper transcription; storage
-  volume for `/data/media`; a new `extract_media` stage becomes `FIRST_STAGE` and the review
-  approve path automatically resumes before it. **`GROQ_API_KEY` is in local `.env` — never
-  commit it** (`.env` is gitignored; `samples/` too). Sample assets ready: screenshot PNG +
-  scanned Nepali PDF in `samples/`; audio clip still pending.
+- **M2 W2/W3 done** (2026-10-15): upload endpoint, `extract_media` FIRST_STAGE, OCR/Whisper,
+  `media_data` volume — but **Whisper path is code-complete, not live-tested** (audio clip
+  still pending from user). **`GROQ_API_KEY` is in local `.env` — never commit it**
+  (`.env` is gitignored; `samples/` too). Documented race: worker may claim `extract_media`
+  before a client finishes uploading (attach right after the 202; combined multipart ingest
+  deferred to M5). Upload-before-processing means re-uploads after `received` → 409.
 - Review-queue UX is API-only (curl/docs); a tiny admin UI could ride on top later.
 - **M3**: LISTEN/NOTIFY, latency harness p50/p95/p99 (data already in `eligible_at`/
   `delivered_at`), dashboards

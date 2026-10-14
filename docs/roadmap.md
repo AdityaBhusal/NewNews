@@ -76,7 +76,7 @@ Legend: `[x]` done · `[~]` in progress / partially done · `[ ]` not started.
 
 ---
 
-## M2 — Real AI + media extraction — **in progress**
+## M2 — Real AI + media extraction — **complete 2026-10-15**
 
 - [x] Groq integration behind the provider interface (landed 2026-10-14, `AI_PROVIDER=groq`):
   single structured-output (json_schema) call per text + in-process TTL cache (validate→enrich
@@ -97,8 +97,18 @@ Legend: `[x]` done · `[~]` in progress / partially done · `[ ]` not started.
   (`reason` required) → new terminal state `rejected`. Every decision audited; wrong state →
   409; non-admin → 403. Verified end-to-end: neutral text held in review → approved →
   enriched → matched → delivered to the client feed; rejected item terminal with reason
-- [ ] Media extraction: PDF text (pypdf); image OCR (Tesseract, eng+nep); audio/video
-  transcription (Groq Whisper) + upload endpoint + storage volume
+- [x] Media upload + extraction (landed 2026-10-15, W2/W3): `POST /api/v1/items/{id}/media`
+  (multipart, client-key auth, attach while `received`, 20 MB cap, MIME+extension dispatch,
+  files under `MEDIA_ROOT/{item_id}/`) + `extract_media` **FIRST_STAGE**: PDF text via pypdf
+  with OCR fallback, image OCR via Tesseract `nep+eng`, audio/video via Groq Whisper
+  (`transcribe` on the Groq provider; ffmpeg pulls audio from video). Extracted text is stored
+  on the asset (`extracted_text`) *and* appended to the item body under a marker so dedupe and
+  the AI see it. Live-verified on real samples: Nepali screenshot → Unicode Devanagari OCR;
+  12 MB Gorkhapatra PDF (Preeti-font text layer = mojibake) → detected by code-punctuation
+  density → rasterized (pypdfium2) → OCR'd into 133 K chars of clean Devanagari → `ne` →
+  Groq assessment → `needs_review` → approved → Nepali summary + topics → `eligible`
+- [x] Hardening learned live: `AI_MAX_INPUT_CHARS=8000` (Groq free tier = 8 K TPM; a 576 K-char
+  body previously 413'd and dead-lettered `validate`), `fonttools` for CFF font encodings
 
 ## M3 — Hardening & delivery
 
