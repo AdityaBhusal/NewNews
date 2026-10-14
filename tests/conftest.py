@@ -15,6 +15,10 @@ if TEST_DATABASE_URL:
     # Must happen before any app module (and its settings) is imported.
     os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 
+# Integration tests exercise *pipeline mechanics* deterministically; AI quality is
+# covered separately by the live Groq smoke tests (which build their own provider).
+os.environ["AI_PROVIDER"] = "stub"
+
 
 @pytest.fixture
 async def db():
