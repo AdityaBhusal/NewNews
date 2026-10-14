@@ -1,0 +1,1 @@
+"""NewNews application package."""
