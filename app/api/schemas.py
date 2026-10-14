@@ -101,3 +101,30 @@ class ClientOut(BaseModel):
 
 class ClientCreated(ClientOut):
     api_key: str = Field(description="Shown once — store it; only the hash is kept.")
+
+
+class ReviewQueue(BaseModel):
+    count: int
+    items: list[ItemOut]
+
+
+class ReviewDecision(BaseModel):
+    note: str | None = Field(default=None, max_length=1000, description="Editorial note (audited).")
+
+
+class ReviewRejection(BaseModel):
+    reason: str = Field(min_length=3, max_length=1000, description="Why the item is rejected.")
+
+
+class AuditEventOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    stage: str | None
+    event_type: str
+    detail: dict
+    created_at: datetime
+
+
+class ReviewDetail(BaseModel):
+    item: ItemOut
+    audit: list[AuditEventOut] = Field(default_factory=list)
