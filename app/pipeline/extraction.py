@@ -18,7 +18,6 @@ _WHITESPACE = re.compile(r"\s+")
 _DEVANAGARI = re.compile(r"[ऀ-ॿ]")
 _DEVANAGARI_THRESHOLD = 0.3
 
-
 def detect_language(text: str) -> str:
     """Rough script-based detection: >=30% Devanagari -> Nepali, else English."""
     if not text:
@@ -52,4 +51,4 @@ async def run(session: AsyncSession, item: NewsItem, provider: AIProvider) -> st
         event_type="extracted",
         detail={"language": item.language, "chars": len(item.body)},
     )
-    return "validate"
+    return "dedupe"

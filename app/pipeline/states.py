@@ -26,11 +26,12 @@ class ItemStatus(StrEnum):
     DELIVERED = "delivered"
     DUPLICATE = "duplicate"
     NEEDS_REVIEW = "needs_review"
+    REJECTED = "rejected"
     FAILED = "failed"
 
 
 TERMINAL_STATUSES: frozenset[ItemStatus] = frozenset(
-    {ItemStatus.DELIVERED, ItemStatus.DUPLICATE, ItemStatus.FAILED}
+    {ItemStatus.DELIVERED, ItemStatus.DUPLICATE, ItemStatus.REJECTED, ItemStatus.FAILED}
 )
 
 TRANSITIONS: dict[ItemStatus, frozenset[ItemStatus]] = {
@@ -38,7 +39,7 @@ TRANSITIONS: dict[ItemStatus, frozenset[ItemStatus]] = {
         {ItemStatus.PROCESSING, ItemStatus.DUPLICATE, ItemStatus.FAILED}
     ),
     ItemStatus.PROCESSING: frozenset(
-        {ItemStatus.VALIDATED, ItemStatus.NEEDS_REVIEW, ItemStatus.FAILED}
+        {ItemStatus.VALIDATED, ItemStatus.NEEDS_REVIEW, ItemStatus.DUPLICATE, ItemStatus.FAILED}
     ),
     ItemStatus.VALIDATED: frozenset(
         {ItemStatus.ENRICHED, ItemStatus.NEEDS_REVIEW, ItemStatus.FAILED}
@@ -47,9 +48,14 @@ TRANSITIONS: dict[ItemStatus, frozenset[ItemStatus]] = {
         {ItemStatus.ELIGIBLE, ItemStatus.NEEDS_REVIEW, ItemStatus.FAILED}
     ),
     ItemStatus.ELIGIBLE: frozenset({ItemStatus.DELIVERED, ItemStatus.FAILED}),
-    ItemStatus.NEEDS_REVIEW: frozenset({ItemStatus.PROCESSING, ItemStatus.FAILED}),
+    # VALIDATED on approve: an editor's decision *is* validation — approve skips
+    # re-assessment (the score would not change) and resumes at enrichment.
+    ItemStatus.NEEDS_REVIEW: frozenset(
+        {ItemStatus.PROCESSING, ItemStatus.VALIDATED, ItemStatus.REJECTED, ItemStatus.FAILED}
+    ),
     ItemStatus.DELIVERED: frozenset(),
     ItemStatus.DUPLICATE: frozenset(),
+    ItemStatus.REJECTED: frozenset(),
     ItemStatus.FAILED: frozenset(),
 }
 

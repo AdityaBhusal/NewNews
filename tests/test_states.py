@@ -42,6 +42,20 @@ def test_review_branch_is_allowed():
     transition(item, ItemStatus.PROCESSING)
 
 
+def test_editorial_decisions():
+    # approve: needs_review -> validated (editor's verdict IS validation)
+    item = FakeItem(ItemStatus.NEEDS_REVIEW.value)
+    transition(item, ItemStatus.VALIDATED)
+    assert item.status == "validated"
+
+    # reject: needs_review -> rejected (terminal, requires an explicit reason upstream)
+    rejected = FakeItem(ItemStatus.NEEDS_REVIEW.value)
+    transition(rejected, ItemStatus.REJECTED)
+    assert rejected.status == "rejected"
+    with pytest.raises(InvalidTransition):
+        transition(rejected, ItemStatus.ELIGIBLE)
+
+
 def test_illegal_transition_raises():
     item = FakeItem(ItemStatus.RECEIVED.value)
     with pytest.raises(InvalidTransition):
@@ -49,7 +63,12 @@ def test_illegal_transition_raises():
 
 
 def test_terminal_states_have_no_exits():
-    for status in (ItemStatus.DELIVERED, ItemStatus.DUPLICATE, ItemStatus.FAILED):
+    for status in (
+        ItemStatus.DELIVERED,
+        ItemStatus.DUPLICATE,
+        ItemStatus.REJECTED,
+        ItemStatus.FAILED,
+    ):
         assert TRANSITIONS[status] == frozenset()
         assert is_terminal(status.value)
         item = FakeItem(status.value)

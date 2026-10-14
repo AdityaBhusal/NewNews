@@ -21,7 +21,7 @@ class PipelineJob(Base, TimestampMixin):
         String(36), ForeignKey("news_items.id", ondelete="CASCADE"), index=True
     )
 
-    stage: Mapped[str] = mapped_column(String(32))  # extract | validate | enrich | match
+    stage: Mapped[str] = mapped_column(String(32))  # extract | dedupe | validate | enrich | match
     status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
     # pending | running | succeeded | dead
 
