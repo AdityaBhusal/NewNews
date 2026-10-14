@@ -5,7 +5,8 @@
 > endpoint, new setting, decisions reversed). If this file and the code disagree, the code
 > wins — then fix this file.
 
-**Status (2026-10-14): M1 complete & verified.** Next: M2 (Groq + media extraction).
+**Status (2026-10-14): M1 complete & verified; M2 in progress — W1 (Groq provider) landed.**
+Next: W4 near-dup → W5 review queue → W2/W3 media upload & extraction.
 Full plan: `README.md` §4 · Detailed docs: `docs/` (requirements, architecture, data-model,
 roadmap, decisions/ADR-0001..0006).
 
@@ -66,7 +67,9 @@ app/
 │   ├── runner.py          # STAGE_HANDLERS registry: extract→validate→enrich→match
 │   ├── audit.py           # record_audit() helper
 │   └── ai/                # base.py (Protocol + dataclasses + STATUS_* + URGENCY_RANK),
-│                          #   stub.py (lexicons, explainable heuristics), factory.py
+│                          #   stub.py (lexicons, explainable heuristics), groq.py (real
+│                          #   LLM: 1 structured json_schema call/text + TTL cache +
+│                          #   translate), factory.py
 ├── worker/main.py         # claim → handler → next stage; retry w/ exp backoff
 │                          #   (base JOB_RETRY_BASE_SECONDS), dead-letter → item failed;
 │                          #   seeds correlation contextvar from item; drain() for tests
@@ -141,7 +144,8 @@ Endpoints: `POST/GET /api/v1/items`, `GET /api/v1/news(?ack=true)`, `GET /api/v1
 
 - `docker compose ps` → api/worker/db healthy, migrate exit 0
 - ffmpeg 7.1.5 + tesseract `eng, nep, osd` inside container
-- 42 tests green on host **and** in container; ruff clean
+- 49 tests green on host **and** in container; ruff clean (42 in M1 + 7 for Groq: 3 offline
+  parser tests + 4 live tests that auto-skip without GROQ_API_KEY)
 - Live E2E: eligible→SSE receipt measured **117 ms** (budget < 2 s)
 - Host PG16 (5432) vs compose PG (5433) — don't cross them
 

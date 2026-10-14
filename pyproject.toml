@@ -12,6 +12,7 @@ dependencies = [
     "psycopg[binary]>=3.2.0",
     "alembic>=1.14.0",
     "pydantic-settings>=2.7.0",
+    "openai>=1.60.0",
 ]
 
 [dependency-groups]

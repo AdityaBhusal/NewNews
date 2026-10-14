@@ -75,12 +75,19 @@ Legend: `[x]` done · `[~]` in progress / partially done · `[ ]` not started.
 
 ---
 
-## M2 — Real AI + media extraction
+## M2 — Real AI + media extraction — **in progress**
 
-- [ ] Groq integration behind the provider interface: summary/draft, classification, explainable credibility score, translation (ne ↔ en)
-- [ ] PDF text extraction; image OCR (Tesseract); audio/video transcription (Groq Whisper)
-- [ ] Duplicate/near-duplicate detection (hash + fuzzy similarity)
-- [ ] Review-queue workflow for uncertain/high-risk items
+- [x] Groq integration behind the provider interface (landed 2026-10-14, `AI_PROVIDER=groq`):
+  single structured-output (json_schema) call per text + in-process TTL cache (validate→enrich
+  = 1 API call), score/confidence/rationale/topics/locations/urgency/summary, ne ↔ en
+  translation; live smoke tests auto-skip without a key; verified E2E on a real Nepali article
+  (score 0.45 "uncertain" → `needs_review` with a 5-point rationale — human-in-the-loop path)
+- [ ] Media extraction: PDF text (pypdf); image OCR (Tesseract, eng+nep); audio/video
+  transcription (Groq Whisper) + upload endpoint + storage volume
+- [ ] Duplicate/near-duplicate detection (0.85 Jaccard shingles → `duplicate` state +
+  `is_duplicate_of`; 0.6–0.85 flagged for review)
+- [ ] Review-queue workflow: list/approve/reject `needs_review` items (admin), approve resumes
+  pipeline
 
 ## M3 — Hardening & delivery
 
