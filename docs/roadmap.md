@@ -1,7 +1,8 @@
 # Roadmap — NewNews
 
-Milestones from README §4, with current status. Status as of **M1 verification complete**
-(stack built, running, and exercised end-to-end on the host).
+Milestones from README §4, with current status. Status as of **M2: W1/W4/W5 complete**
+(Groq provider, near-duplicate detection, editorial review queue — all verified 2026-10-15;
+media extraction W2/W3 remains).
 
 Legend: `[x]` done · `[~]` in progress / partially done · `[ ]` not started.
 
@@ -82,12 +83,22 @@ Legend: `[x]` done · `[~]` in progress / partially done · `[ ]` not started.
   = 1 API call), score/confidence/rationale/topics/locations/urgency/summary, ne ↔ en
   translation; live smoke tests auto-skip without a key; verified E2E on a real Nepali article
   (score 0.45 "uncertain" → `needs_review` with a 5-point rationale — human-in-the-loop path)
+- [x] Near-duplicate detection (landed 2026-10-15, `app/pipeline/dedupe.py`, stage between
+  `extract` and `validate`): token 3-gram shingles + Jaccard over a bounded candidate window
+  (`NEARDUP_*` settings — 90 d / 2000 candidates / suspect 0.6 / hard 0.85); ≥ 0.85 →
+  `duplicate` + `is_duplicate_of` + audit `near_duplicate`; 0.6–0.85 → `near_duplicate_suspect`
+  audit, pipeline continues; body-first scoring so reworded headlines don't hide matching copy.
+  Verified: reworded cross-source copy of an existing article → `duplicate`, distinct articles
+  untouched (integration tests)
+- [x] Editorial review queue (landed 2026-10-15, `app/api/routers/review.py`, admin-only):
+  `GET /api/v1/review` (queue) · `GET /api/v1/review/{id}` (item + full audit timeline) ·
+  `POST …/approve` (`note?`) → `needs_review` → `validated`, pipeline resumes at **enrich**
+  (the editor's verdict *is* validation — re-scoring would not change) · `POST …/reject`
+  (`reason` required) → new terminal state `rejected`. Every decision audited; wrong state →
+  409; non-admin → 403. Verified end-to-end: neutral text held in review → approved →
+  enriched → matched → delivered to the client feed; rejected item terminal with reason
 - [ ] Media extraction: PDF text (pypdf); image OCR (Tesseract, eng+nep); audio/video
   transcription (Groq Whisper) + upload endpoint + storage volume
-- [ ] Duplicate/near-duplicate detection (0.85 Jaccard shingles → `duplicate` state +
-  `is_duplicate_of`; 0.6–0.85 flagged for review)
-- [ ] Review-queue workflow: list/approve/reject `needs_review` items (admin), approve resumes
-  pipeline
 
 ## M3 — Hardening & delivery
 

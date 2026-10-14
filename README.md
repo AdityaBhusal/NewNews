@@ -2,8 +2,9 @@
 
 [![CI](https://github.com/AdityaBhusal/NewNews/actions/workflows/ci.yml/badge.svg)](https://github.com/AdityaBhusal/NewNews/actions/workflows/ci.yml)
 
-> **Status:** M1 vertical slice implemented — text ingestion → stub-AI pipeline → client
-> matching → REST + SSE delivery, with tests (42 passing against Postgres) and a Docker build.
+> **Status:** M1 vertical slice verified (42 tests, live SSE in 117 ms) · M2 in progress —
+> **Groq AI provider, near-duplicate detection, and the editorial review queue landed**
+> (61 tests). Remaining: media extraction (PDF/OCR/Whisper).
 > M0 docs live in `docs/` (requirements, architecture, data-model, roadmap, ADRs 0001–0006).
 
 NewNews is a prototype news-intelligence platform that accepts raw news/media (text, images,
@@ -77,7 +78,7 @@ NewNews/
 ├── app/
 │   ├── api/                # FastAPI routers: ingest, news, clients, events (SSE), health
 │   ├── worker/             # pipeline runner: polls jobs table, executes stages
-│   ├── pipeline/           # extraction, ai (provider iface + stub, groq in M2), validation,
+│   ├── pipeline/           # extraction, dedupe, ai (stub + groq), validation,
 │   │                       #   enrichment, matching, queue, audit, states
 │   ├── core/               # config, db sessions, logging + correlation IDs, security
 │   ├── models/             # SQLAlchemy models
@@ -157,11 +158,15 @@ from this budget.
 - `pytest` passes; docs synchronized with implementation.
 
 ### M2 — Real AI + media extraction
-- Groq integration behind the provider interface: summary/draft, classification, explainable
-  credibility score, translation (ne ↔ en).
-- PDF text extraction; image OCR (Tesseract); audio/video transcription (Groq Whisper).
-- Duplicate/near-duplicate detection (hash + fuzzy similarity).
-- Review-queue workflow for uncertain/high-risk items.
+- [x] Groq integration behind the provider interface: explainable credibility score,
+  classification, summary, translation (ne ↔ en) — one structured-output call per article,
+  `AI_PROVIDER=groq` (stub stays the offline/CI default).
+- [x] Duplicate/near-duplicate detection: exact content hash at ingest + fuzzy shingle/Jaccard
+  stage (≥ 0.85 → `duplicate` with `is_duplicate_of`, 0.6–0.85 flagged `near_duplicate_suspect`).
+- [x] Review-queue workflow: admin `GET /api/v1/review`, item detail with audit timeline,
+  approve (resumes at enrichment) / reject (terminal `rejected`, reason audited).
+- [ ] PDF text extraction; image OCR (Tesseract); audio/video transcription (Groq Whisper);
+  `POST /api/v1/items/{id}/media` upload endpoint.
 
 ### M3 — Hardening & delivery
 - Retry/backoff, dead-letter handling, partial-failure semantics.

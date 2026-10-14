@@ -34,7 +34,7 @@ Unique constraint `uq_items_source_hash (source_key, content_hash)` — the idem
 | `source` | `VARCHAR(200)`, nullable | Free-text origin |
 | `language` | `VARCHAR(8)`, nullable | `en` / `ne`; detected if not supplied |
 | `status` | `VARCHAR(32)`, indexed | State machine, default `received` (§7) |
-| `is_duplicate_of` | `VARCHAR(36)`, FK → `news_items.id` `ON DELETE SET NULL`, nullable | Reserved for explicit duplicate linkage (M2 fuzzy matching) |
+| `is_duplicate_of` | `VARCHAR(36)`, FK → `news_items.id` `ON DELETE SET NULL`, nullable | Canonical item this row duplicates — set by the M2 `dedupe` stage (≥ 0.85 shingle similarity) |
 | `summary` | `TEXT`, nullable | AI assessment output |
 | `credibility_score` | `FLOAT`, nullable | 0–1 assessment |
 | `credibility_confidence` | `FLOAT`, nullable | 0–1, provider's confidence in *its own* score |
@@ -147,8 +147,8 @@ stage retries idempotent.
 | `id` | `VARCHAR(36)` PK | UUID string |
 | `correlation_id` | `VARCHAR(36)`, indexed | Copied from the item — joins stages of one submission |
 | `item_id` | `VARCHAR(36)`, FK → `news_items.id` `ON DELETE CASCADE`, nullable, indexed | |
-| `stage` | `VARCHAR(32)`, nullable | `ingest` \| `extract` \| `validate` \| `enrich` \| `match` \| `deliver` |
-| `event_type` | `VARCHAR(64)`, indexed | e.g. `received`, `extracted`, `validated`, `needs_review`, `enriched`, `eligible`, `delivered`, `extraction_failed`, `job_dead` |
+| `stage` | `VARCHAR(32)`, nullable | `ingest` \| `extract` \| `dedupe` \| `validate` \| `enrich` \| `match` \| `deliver` \| `review` |
+| `event_type` | `VARCHAR(64)`, indexed | e.g. `received`, `extracted`, `dedupe_passed`, `near_duplicate`, `near_duplicate_suspect`, `validated`, `needs_review`, `review_approved`, `review_rejected`, `enriched`, `eligible`, `delivered`, `extraction_failed`, `job_dead` |
 | `detail` | `JSONB`, default `{}` | Stage-specific evidence (scores, rationale, matched clients, `latency_ms`, errors) |
 | `created_at` | `TIMESTAMPTZ`, indexed, `server_default now()` | No `updated_at` — append-only |
 
@@ -158,23 +158,25 @@ Authoritative table: `app/pipeline/states.py::TRANSITIONS`.
 
 | From | Allowed transitions | Set by |
 |---|---|---|
-| `received` | `processing`, `duplicate`, `failed` | `extract` stage; `failed` on empty body / dead job. (`duplicate` is allowed by the table but **never assigned in M1** — see note below) |
-| `processing` | `validated`, `needs_review`, `failed` | `validate` stage (`failed` via dead-letter path) |
+| `received` | `processing`, `duplicate`, `failed` | `extract` stage; `failed` on empty body / dead job |
+| `processing` | `validated`, `needs_review`, `duplicate`, `failed` | `dedupe` stage (`duplicate`, links `is_duplicate_of`); `validate` stage (`validated` / `needs_review`); `failed` via dead-letter path |
 | `validated` | `enriched`, `needs_review`, `failed` | `enrich` stage |
 | `enriched` | `eligible`, `needs_review`, `failed` | `match` stage (`needs_review` when no topics and no locations) |
 | `eligible` | `delivered`, `failed` | First SSE send or `GET /api/v1/news?ack=true` |
-| `needs_review` | `processing`, `failed` | Manual re-entry (no API/UI in M1) |
+| `needs_review` | `validated`, `rejected`, `processing`, `failed` | **approve** → `validated` (pipeline resumes at `enrich`); **reject** → `rejected`; `processing` = manual re-entry; `failed` via dead-letter |
 | `delivered` | — (terminal) | |
 | `duplicate` | — (terminal) | |
+| `rejected` | — (terminal) | Editorial rejection (reason audited) |
 | `failed` | — (terminal) | |
 
-Terminal set: `delivered`, `duplicate`, `failed`. Any other target raises `InvalidTransition`.
+Terminal set: `delivered`, `duplicate`, `rejected`, `failed`. Any other target raises
+`InvalidTransition`.
 
-**Note on `duplicate`:** in M1 deduplication happens *before* an insert — `POST /api/v1/items`
-looks up `(source_key, content_hash)` and returns the **existing** row with
-`duplicate: true` in the response (200 instead of 202). No new row is created and no row is
-moved into the `duplicate` state; the state exists in the machine for future near-duplicate
-handling (M2 `is_duplicate_of` linkage).
+**Note on `duplicate`:** two mechanisms feed it. (1) *Exact* dedupe happens **before** an insert —
+`POST /api/v1/items` looks up `(source_key, content_hash)` and returns the **existing** row with
+`duplicate: true` (200 instead of 202); no new row is created. (2) *Near*-duplicate detection
+happens **after** insert, in the `dedupe` stage: shingle/Jaccard similarity ≥ `NEARDUP_THRESHOLD`
+(0.85) moves the new row into `duplicate` and stamps `is_duplicate_of` with the canonical item id.
 
 ## 9. ER overview
 

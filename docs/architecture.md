@@ -23,15 +23,17 @@ service; only the command differs (see ADR-0005).
         │
         ▼   worker loop (claim FOR UPDATE SKIP LOCKED; idle poll 200 ms)
 
-  extract ──► validate ──► enrich ──► match
-     │            │           │          │
- processing    validated   enriched    eligible
-               └─ needs_review ◄┘          │  deliveries(pending) per matched client
-                   (stops; no deliveries)  │
-        │                                  │
-        ▼                                  ▼
+  extract ──► dedupe ──► validate ──► enrich ──► match
+     │           │           │           │          │
+ processing   duplicate    validated   enriched    eligible
+              (≥0.85,      └─ needs_review ◄┘       │  deliveries(pending) per matched client
+               linked)         (stops; no deliveries)│
+                                │  admin approve ──► validated ──► enrich (resume)
+                                │  admin reject  ──► rejected (terminal)
+        │                      │                     │
+        ▼                      ▼                     ▼
    GET /api/v1/events  (SSE, 200 ms poll)  or  GET /api/v1/news?ack=true  (REST)
-        └──────────────► delivered ◄──────────┘
+        └──────────────► delivered ◄──────────────────┘
                           audit(delivered, latency_ms)
 ```
 
@@ -47,7 +49,7 @@ is `dead` and the item becomes `failed`.
 | Concern | `api` process | `worker` process |
 |---|---|---|
 | Entry point | `app/api/main.py` (`create_app`) | `app/worker/main.py` (`main`, `python -m app.worker`) |
-| Does | HTTP validation, auth, ingestion (writes `news_items` + first job), REST/SSE delivery, admin, health | Claims jobs, runs `extract/validate/enrich/match`, retries, dead-letters |
+| Does | HTTP validation, auth, ingestion (writes `news_items` + first job), REST/SSE delivery, admin, review queue, health | Claims jobs, runs `extract/dedupe/validate/enrich/match`, retries, dead-letters |
 | Does **not** | Run pipeline stages | Serve HTTP; the SSE/REST paths live only in `api` |
 | Shared | `app/core` (config, db, logging, security, context), `app/models`, `app/pipeline` — same code, same image |
 | Scaling | Uvicorn process(es) | Multiple workers are safe: `SKIP LOCKED` claims are exclusive; `worker_id = hostname:pid` |
@@ -64,6 +66,7 @@ rows (worker → api). M1 notify is polling; M3 upgrades it to `LISTEN/NOTIFY` (
 | `app/api/routers/news.py` | `GET /api/v1/news` (pull feed + `ack`), `GET /api/v1/items/{id}` (detail) |
 | `app/api/routers/events.py` | `GET /api/v1/events` — SSE stream, `Last-Event-ID` resume, heartbeats, delivery → `sent` |
 | `app/api/routers/clients.py` | `POST /api/v1/clients` (admin mint), `GET /api/v1/clients/me` |
+| `app/api/routers/review.py` | `GET /api/v1/review` + `/review/{id}` (audit timeline), `POST /review/{id}/approve|reject` (admin, M2 W5) |
 | `app/api/routers/health.py` | `/healthz`, `/readyz` |
 | `app/api/deps.py` | API-key extraction, `get_current_client`, `require_admin` |
 | `app/api/schemas.py` | Pydantic request/response models (validation limits, `ItemOut`, …) |
@@ -76,11 +79,12 @@ rows (worker → api). M1 notify is polling; M3 upgrades it to `LISTEN/NOTIFY` (
 | `app/pipeline/states.py` | `ItemStatus`, transition table, `transition()`, terminal states |
 | `app/pipeline/hashing.py` | Text normalization + content hash (idempotency key) |
 | `app/pipeline/extraction.py` | Stage `extract`: normalize body, language detection, empty-body → `failed` |
+| `app/pipeline/dedupe.py` | Stage `dedupe`: shingle/Jaccard near-duplicate check → `duplicate` (links `is_duplicate_of`) or `near_duplicate_suspect` audit (M2 W4) |
 | `app/pipeline/validation.py` | Stage `validate`: credibility assessment + routing thresholds |
 | `app/pipeline/enrichment.py` | Stage `enrich`: topics, locations, urgency, summary |
 | `app/pipeline/matching.py` | Stage `match`: pure `subscription_matches()` rule + delivery fan-out |
 | `app/pipeline/queue.py` | `enqueue_job`, `claim_job` (`FOR UPDATE SKIP LOCKED`), `reschedule_job` |
-| `app/pipeline/runner.py` | Stage registry (`extract/validate/enrich/match`), `STAGE_ORDER`, `FIRST_STAGE` |
+| `app/pipeline/runner.py` | Stage registry (`extract/dedupe/validate/enrich/match`), `STAGE_ORDER`, `FIRST_STAGE` |
 | `app/pipeline/audit.py` | `record_audit()` — one audit row per stage outcome |
 | `app/pipeline/ai/base.py` | `AIProvider` protocol + `CredibilityAssessment` / `Classification` dataclasses, urgency ranks |
 | `app/pipeline/ai/stub.py` | Deterministic heuristic provider (offline, explainable) |
@@ -132,6 +136,7 @@ stateDiagram-v2
     received --> failed
     processing --> validated
     processing --> needs_review
+    processing --> duplicate
     processing --> failed
     validated --> enriched
     validated --> needs_review
@@ -141,10 +146,13 @@ stateDiagram-v2
     enriched --> failed
     eligible --> delivered
     eligible --> failed
+    needs_review --> validated
+    needs_review --> rejected
     needs_review --> processing
     needs_review --> failed
     delivered --> [*]
     duplicate --> [*]
+    rejected --> [*]
     failed --> [*]
 ```
 
@@ -154,11 +162,17 @@ The table in `app/pipeline/states.py` (`TRANSITIONS`) is authoritative; `transit
 
 Branches:
 
-- `duplicate` — reserved by the state machine; in M1 dedupe happens *before* insert (the API
-  returns the existing row with `duplicate: true`), so no item row is ever placed in this state.
-- `needs_review` — low credibility/confidence (validate) or nothing to match (enrich). Terminal
-  for automation; a later manual re-entry to `processing` is allowed by the table but has no UI
-  or API in M1.
+- `duplicate` — two ways in: (1) exact `(source_key, content_hash)` dedupe answers at the API
+  without creating a row, and (2) the `dedupe` stage's shingle/Jaccard check (≥ `NEARDUP_THRESHOLD`
+  0.85 vs recent items) moves the row here and links `is_duplicate_of` to the canonical item.
+  Scores in `[NEARDUP_SUSPECT_THRESHOLD, threshold)` continue but are flagged
+  `near_duplicate_suspect` in the audit trail.
+- `needs_review` — low credibility/confidence (validate), nothing to match (enrich), or a
+  `near_duplicate_suspect`-adjacent editorial hold. Terminal for automation; the **review API**
+  (`/api/v1/review`, admin-only) resolves it: approve → `validated` (pipeline resumes at `enrich`
+  — re-scoring would return the same number, the editor's verdict *is* validation) or reject →
+  `rejected` with an audited reason.
+- `rejected` — editorial rejection; terminal, never delivered.
 - `failed` — empty body, or a job that exhausted its 3 attempts.
 
 ## 7. Delivery model
