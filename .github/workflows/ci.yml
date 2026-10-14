@@ -41,7 +41,7 @@ jobs:
       - name: Lint (ruff)
         run: uv run ruff check .
 
-      - name: Tests (42: unit + Postgres integration)
+      - name: Tests (unit + Postgres integration)
         run: uv run pytest
 
   docker:
