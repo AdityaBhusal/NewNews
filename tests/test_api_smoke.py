@@ -14,6 +14,30 @@ async def test_healthz_is_open(api):
     assert response.headers.get("X-Correlation-ID")
 
 
+async def test_readyz_reports_readiness_or_redacted_error(api):
+    response = await api.get("/readyz")
+    assert response.status_code in (200, 503)
+    body = response.json()
+    if response.status_code == 200:
+        assert body == {"status": "ready"}
+    else:  # 503: class + bounded message, never credentials
+        assert body["status"] == "unavailable"
+        assert ":" in body["detail"]
+        assert len(body["detail"]) <= 400 + 64
+
+
+def test_safe_db_error_redacts_url_credentials():
+    from app.api.routers.health import safe_db_error
+
+    exc = RuntimeError(
+        "connection failed: postgresql+psycopg://newnews:s3cr3t@db.example:5432/news?sslmode=require"
+    )
+    message = safe_db_error(exc)
+    assert "s3cr3t" not in message
+    assert "://***@db.example" in message
+    assert safe_db_error(RuntimeError("")) == "RuntimeError"
+
+
 async def test_root_lists_entry_points(api):
     response = await api.get("/")
     assert response.status_code == 200
