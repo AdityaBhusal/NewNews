@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NewNews — Pipeline tracker</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; }
+  input { width: 100%; padding: .5rem; margin-bottom: .5rem; box-sizing: border-box; }
+  .head { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
+  .badges span { display: inline-block; font-size: .8rem; border-radius: 999px; padding: .1rem .6rem; margin-right: .4rem; }
+  .ed { background: #d0ebff; }
+  ol.timeline { list-style: none; padding: 0; }
+  ol.timeline li { border-left: 3px solid #1a7f37; margin: 0 0 .4rem .4rem; padding: .3rem 0 .3rem .8rem; }
+  ol.timeline .st { color: #666; font-size: .85rem; }
+  code { font-size: .85rem; }
+</style>
+</head>
+<body>
+<h1>Pipeline tracker <small>(where is my item?)</small></h1>
+<p><a href="/feed">Feed</a> · <a href="/live">Live</a></p>
+<input id="admin" type="password" placeholder="Admin key (X-Admin-Key)" />
+<input id="item" placeholder="Item id (from ingest response)" />
+<button onclick="track()">Track</button>
+<div id="out"></div>
+<script>
+async function track() {
+  const admin = document.getElementById('admin').value;
+  const id = document.getElementById('item').value.trim();
+  const out = document.getElementById('out');
+  const r = await fetch('/api/v1/review/' + encodeURIComponent(id), {headers: {'X-Admin-Key': admin}});
+  if (!r.ok) { out.innerHTML = '<p>Lookup failed: ' + r.status + ' ' + (await r.text()) + '</p>'; return; }
+  const { item: i, audit } = await r.json();
+  out.innerHTML = `<div class="head">
+      <div class="badges"><span><strong>${i.status}</strong></span>
+      <span>certainty ${i.certainty_label}</span>
+      ${i.editorially_reviewed ? '<span class="ed">✓ editorially reviewed</span>' : ''}</div>
+      <p><code>${i.id}</code></p>
+      <p>${i.summary || ''}</p>
+      <p><small>score ${i.credibility_score ?? '—'} · conf ${i.credibility_confidence ?? '—'} · ${i.language || ''} · ${(i.topics || []).join(', ')}</small></p>
+    </div>
+    <h3>Journey (${audit.length} steps)</h3>
+    <ol class="timeline">` + audit.map(e =>
+      `<li><strong>${e.event_type}</strong> <span class="st">${e.stage || ''} · ${e.created_at}</span></li>`
+    ).join('') + `</ol>`;
+}
+</script>
+</body>
+</html>

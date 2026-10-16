@@ -79,9 +79,10 @@ async def test_clients_requires_admin_key(api):
 
 
 async def test_delivery_pages_serve_html(api):
-    for path in ("/feed", "/live"):
+    for path in ("/feed", "/live", "/track"):
         response = await api.get(path)
         assert response.status_code == 200, path
         assert "text/html" in response.headers["content-type"]
     assert "api/v1/news" in (await api.get("/feed")).text
     assert "api/v1/events" in (await api.get("/live")).text
+    assert "api/v1/review" in (await api.get("/track")).text

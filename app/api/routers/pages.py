@@ -31,3 +31,9 @@ async def feed_page() -> HTMLResponse:
 async def live_page() -> HTMLResponse:
     """Delivery UI #2: live push over SSE (`GET /api/v1/events`)."""
     return _page("live.html")
+
+
+@router.get("/track", response_class=HTMLResponse)
+async def track_page() -> HTMLResponse:
+    """Pipeline viewer: item status + badges + full audit journey (admin key)."""
+    return _page("track.html")
