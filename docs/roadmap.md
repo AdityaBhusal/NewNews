@@ -186,6 +186,12 @@ FR numbers = `docs/requirements.md` · ADR numbers = `docs/decisions/` · W numb
   `/live` (SSE push), both rendering `certainty_label` + `editorially_reviewed` badges;
   `?api_key=` query auth for browser `EventSource` (keys excluded from request logs)
 - [ ] Manual E2E from the app: ingest → website `/live` → approve in Review tab → delivery
+- [x] Category clients + 200-seed testbed on Aiven (stub-scored, free): 140 review,
+  59 eligible; deliveries per category mirrored (59/53/17/11); `python -m app.seed_demo`
+- [x] Review detail carries media assets (uploads no longer invisible); app Review/Track
+  render them with extraction status
+- [x] Delivery latency visible: ingest→eligible + eligible→delivered on Track cards,
+  feed cards, and the audit trail (`eligible_at`/`delivered_at` were already stamped)
 - [ ] Kept thin — all processing lives server-side
 
 ---

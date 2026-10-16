@@ -5,10 +5,11 @@
 > endpoint, new setting, decisions reversed). If this file and the code disagree, the code
 > wins — then fix this file.
 
-**Status (2026-10-17): M1–M2 complete & verified; M4 live — Aiven `newnews` wired,
-web service + in-container worker (`scripts/render_start.sh`), remote E2E green,
-keep-warm workflow added, AI `certainty_label` + `editorially_reviewed` badge landed.
-Remaining: remote media/OCR upload test, audio clip for Whisper, then M3-slim + M5.** README rewritten 2026-10-16
+**Status (2026-10-17): M1–M2 complete; M4 live; M5 app built — 5 tabs
+(Ingest+Dice, Deliver Live/REST, Review+media, always-live Track, Settings),
+Dice catalog (20 stub-verified), 200-seed + 4 category clients on Aiven,
+review media + latency/badges live. Remaining: your manual E2E, Whisper clip,
+M3-slim.** README rewritten 2026-10-16
 (descriptive, layman→technical; plan/progress in `docs/roadmap.md`).
 Full plan: `docs/roadmap.md` · Detailed docs: `docs/` (requirements, architecture, data-model,
 deployment, decisions/ADR-0001..0007, phase0-findings).
