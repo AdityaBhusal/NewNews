@@ -163,18 +163,17 @@ FR numbers = `docs/requirements.md` · ADR numbers = `docs/decisions/` · W numb
 - [x] Health-check path `/healthz` + **pre-deploy `alembic upgrade head`** set via Render API
 - [x] Env vars set via Render API (2026-10-16): `AI_PROVIDER=groq`, `GROQ_API_KEY`,
   `ADMIN_API_KEY`, `MEDIA_ROOT` (`DATABASE_URL` pending)
-- [ ] `DATABASE_URL` → remote Postgres. Aiven URL lives in local `.env` as
-  `DATABASE_URL_AIVEN`, scheme must be rewritten `postgres://` → `postgresql+psycopg://`.
-  **Blocker 2026-10-16**: the `rowmance-db-rowmance.c.aivencloud.com` hostname no longer
-  resolves (service deleted/renamed in Aiven) — a valid connection string is required first
-- [ ] Background Worker service from the **same image** (`python -m app.worker`) — ADR-0005's
-  "one image, two processes" exercised in the cloud
-- [ ] Remote E2E verification on the public URL: ingest → worker stages → SSE receipt →
-  review approve → eligible (script the curl sequence into docs)
+- [x] `DATABASE_URL` → Aiven Postgres (new `newnews` service 2026-10-16 after the old
+  hostname expired; scheme rewritten `postgres://` → `postgresql+psycopg://`; schema created
+  via `alembic upgrade head` run manually from here — the Render API has no pre-deploy field)
+- [x] Worker in the cloud: free plan rejects Background Worker services, so
+  `scripts/render_start.sh` runs the worker beside the API in the one web service
+  (production splits them per ADR-0005; `Dockerfile` COPYs `scripts/`)
+- [x] Remote E2E green 2026-10-16 (`scripts/remote_e2e.sh`): readiness → mint → ingest →
+  cloud worker (received→processing→needs_review in ~6 s) → remote approve → enrich
+  (Groq summary + topics) → `eligible` — zero localhost in the path
 - [ ] Media on the free tier: ephemeral disk accepted/documented → S3-compatible object
-  storage as the production path
-- [ ] Deployment topology recorded in the repo (`render.yaml` blueprint or a docs page —
-  without enabling blueprint sync, so the API-managed services aren't duplicated)
+  storage as the production path (remote OCR upload test still to run)
 
 ## M5 — Mobile data collection (Expo / React Native)
 
@@ -189,6 +188,8 @@ FR numbers = `docs/requirements.md` · ADR numbers = `docs/decisions/` · W numb
 - [x] `GROQ_API_KEY` in local `.env` (env-only, never committed)
 - [ ] **Valid Aiven connection string** → `DATABASE_URL_AIVEN` (current hostname expired) —
   unblocks M4's `DATABASE_URL` + first deploy with migrations
-- [ ] Create the Render worker service + run the remote E2E script (M4)
+- [ ] Create the Render worker service + run the remote E2E script (M4) — **done
+  2026-10-16**: worker runs via `scripts/render_start.sh` in the one free-tier web service
+  (Background Worker rejected by plan); remote E2E green incl. approve→eligible
 - [ ] Audio clip from the user → live Whisper transcription test (last M2 asterisk)
 - [ ] Render free-tier trade-offs accepted & documented (ephemeral disk, spin-down)

@@ -5,13 +5,13 @@
 > endpoint, new setting, decisions reversed). If this file and the code disagree, the code
 > wins — then fix this file.
 
-**Status (2026-10-16): M1–M2 complete & verified; M4 (Render cloud deploy) IN PROGRESS —
-web service live + API-managed env/healthcheck/pre-deploy; BLOCKED on a valid Aiven
-connection string (old hostname no longer resolves). M3 slimmed per new ADR-0007;
-M5 next.** README was rewritten 2026-10-16 (descriptive, layman→technical; the plan/progress
-now live in `docs/roadmap.md`).
+**Status (2026-10-16): M1–M2 complete & verified; M4 substantially done — Aiven `newnews`
+service wired, schema migrated, web service + in-container worker live, remote E2E green
+(ingest→worker→Groq→review→approve→eligible on the public URL). Remaining: remote media/OCR
+upload test, audio clip for Whisper, then M3-slim + M5.** README rewritten 2026-10-16
+(descriptive, layman→technical; plan/progress in `docs/roadmap.md`).
 Full plan: `docs/roadmap.md` · Detailed docs: `docs/` (requirements, architecture, data-model,
-decisions/ADR-0001..0007, phase0-findings).
+deployment, decisions/ADR-0001..0007, phase0-findings).
 
 ---
 
