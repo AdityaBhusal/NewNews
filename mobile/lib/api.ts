@@ -1,5 +1,7 @@
 /** Minimal client for the NewNews public API (M5 Expo app). */
 
+import EventSource from "react-native-sse";
+
 export interface Settings {
   baseUrl: string;
   clientKey: string;
@@ -131,4 +133,41 @@ export function rejectItem(settings: Settings, id: string, reason: string): Prom
     body: { reason },
     admin: true,
   });
+}
+
+/**
+ * Live delivery stream (SSE). Unlike browsers, React Native can set headers,
+ * so the client key travels as `Authorization: Bearer` — no query-key needed.
+ * Calls `onNews` for every `news` event; returns a cleanup function.
+ */
+export function subscribeDeliveries(
+  settings: Settings,
+  onNews: (deliveryId: number) => void,
+  onError?: (message: string) => void,
+): () => void {
+  const source = new EventSource(`${settings.baseUrl}/api/v1/events`, {
+    headers: { Authorization: `Bearer ${settings.clientKey}` },
+  });
+  // Runtime dispatches our custom `news` frames; the library's types only know
+  // the built-in names, so the cast stays at this boundary (value is "news").
+  source.addEventListener("news" as "message", (event) => {
+    try {
+      const raw = (event as unknown as { data?: unknown }).data;
+      const data = JSON.parse(typeof raw === "string" ? raw : "{}") as {
+        delivery_id?: number;
+      };
+      if (typeof data.delivery_id === "number") onNews(data.delivery_id);
+    } catch {
+      // Malformed frame: ignore, the stream stays open.
+    }
+  });
+  source.addEventListener("error", (event) => {
+    onError?.(
+      event.type === "error" && event.message ? String(event.message) : "stream error",
+    );
+  });
+  return () => {
+    source.removeAllEventListeners();
+    source.close();
+  };
 }

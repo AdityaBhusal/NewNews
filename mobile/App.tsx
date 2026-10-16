@@ -5,11 +5,12 @@ import { Button, StyleSheet, Text, TextInput, View } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import IngestScreen from "./components/IngestScreen";
 import ReviewScreen from "./components/ReviewScreen";
+import TrackScreen from "./components/TrackScreen";
 import { DEFAULT_SETTINGS, Settings } from "./lib/api";
 
 const STORAGE_KEY = "newnews-settings-v1";
 
-type Tab = "ingest" | "review" | "settings";
+type Tab = "ingest" | "review" | "track" | "settings";
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("ingest");
@@ -43,19 +44,26 @@ export default function App() {
   return (
     <View style={styles.root}>
       <View style={styles.tabs}>
-        {(["ingest", "review", "settings"] as Tab[]).map((t) => (
+        {(["ingest", "review", "track", "settings"] as Tab[]).map((t) => (
           <Text
             key={t}
             onPress={() => setTab(t)}
             style={[styles.tab, tab === t && styles.active]}
           >
-            {t === "ingest" ? "Ingest" : t === "review" ? "Review" : "Settings"}
+            {t === "ingest"
+              ? "Ingest"
+              : t === "review"
+                ? "Review"
+                : t === "track"
+                  ? "Track"
+                  : "Settings"}
           </Text>
         ))}
       </View>
       <View style={styles.body}>
         {tab === "ingest" && <IngestScreen settings={settings} />}
         {tab === "review" && <ReviewScreen settings={settings} />}
+        {tab === "track" && <TrackScreen settings={settings} />}
         {tab === "settings" && (
           <View style={styles.form}>
             <Text style={styles.label}>API base URL</Text>
