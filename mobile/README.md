@@ -1,8 +1,9 @@
-# NewNews field app (Expo Go)
+# NewNews field app (Expo Go, SDK 57)
 
 Ingest stories (text + photo) and run editorial review from a phone — same public
 API the website uses. No separate backend, no separate app for editors: **Ingest**
-and **Review** are tabs.
+and **Review** are tabs. Requires Expo Go with SDK 57 support (the project pins
+`expo@~57`; if your Go app is older, update it from the Play Store).
 
 ## Run it
 
