@@ -49,7 +49,7 @@ minting keys.
 
 ## 4. M1 acceptance criteria
 
-Adapted from README §4 — all verified 2026-10-14:
+Adapted from the original M1 plan (now tracked in `docs/roadmap.md`) — all verified 2026-10-14:
 
 - [x] `docker compose up --build` brings up healthy `api`, `worker`, `db` with no host installs of ffmpeg/tesseract.
 - [x] Submit a text news item via Swagger/curl → it flows through all stages → matched client receives it via SSE in < 2 s after eligibility.

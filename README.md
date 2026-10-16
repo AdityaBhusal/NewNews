@@ -1,276 +1,123 @@
-# NewNews — AI-Powered News Intelligence Pipeline (Nepal)
+# NewNews — AI news intelligence for Nepal
 
 [![CI](https://github.com/AdityaBhusal/NewNews/actions/workflows/ci.yml/badge.svg)](https://github.com/AdityaBhusal/NewNews/actions/workflows/ci.yml)
 
-> **Status:** M1 vertical slice verified · **M2 complete** (Groq AI, near-dup, review queue,
-> media upload/OCR/Whisper — 73 tests green, live E2E: Nepali newspaper scan → mojibake
-> detected → OCR → Groq → `needs_review` → approved → Nepali summary → `eligible`).
-> Next: M4 Render deployment. M0 docs live in `docs/` (requirements, architecture,
-> data-model, roadmap, ADRs 0001–0006).
+NewNews turns raw news material into ready-to-publish, trustworthy news — automatically.
+A newsroom hands it whatever is on the desk: a story draft, a photo of a press release, a
+scanned newspaper page, an audio clip. NewNews reads it (including Nepali OCR), checks how
+credible it looks, tags what and where it is about, matches it to the clients subscribed to
+those beats, and pushes it to them the instant it is ready. When the AI is *not sure*, the
+item waits for a human editor instead of reaching the feed — *AI gives assessments,
+editors give decisions*.
 
-NewNews is a prototype news-intelligence platform that accepts raw news/media (text, images,
-audio, video, documents), extracts and processes its content, assesses credibility, enriches it
-with structured metadata, matches it to configured clients, and delivers eligible items through
-fast REST APIs and push-based (SSE) notifications. It is being built as a technical assessment
-for a startup interview, emphasizing sound engineering, AI integration, reliability, and
-practical trade-offs.
-
----
-
-## 1. Verified environment & facts (Phase 0 findings)
-
-| Item | Finding | Source |
-|---|---|---|
-| Repository | Greenfield — only an MIT `LICENSE` existed | local inspection |
-| Host machine | Ubuntu 24.04, Python 3.13.7, Node 20, .NET 10 SDK; Docker Engine + Compose and PostgreSQL 16 installed during M1 (were missing in Phase 0) | local inspection |
-| Groq | Has a **free plan** with rate limits (e.g. `whisper-large-v3`: 20 RPM / 2K RPD; `openai/gpt-oss-120b`: 30 RPM / 200K TPM). OpenAI-compatible API at `https://api.groq.com/openai/v1`. Offers Speech-to-Text, OCR/Image Recognition, Structured Outputs | [Groq docs – Overview](https://console.groq.com/docs/overview), [Rate Limits](https://console.groq.com/docs/rate-limits) |
-| Render + Docker | Render **fully supports Docker** deploys (builds from Dockerfile via BuildKit); explicitly recommended when OS-level packages (ffmpeg, tesseract) are required. Persistent disks, private networking, pre-deploy commands supported | [render.com/docs/docker](https://render.com/docs/docker) |
-| FastAPI | v0.143.0 (Oct 2026), MIT, Python 3.10–3.14, Pydantic v2 | [pypi.org/project/fastapi](https://pypi.org/project/fastapi/) |
-| SQLite concurrency | Single-writer; client/server DB recommended under real concurrency | [sqlite.org FAQ #5](https://sqlite.org/faq.html) |
-| Hangfire | Maintained (1.8.23, Feb 2026), but official storages are SQL Server/Redis only | [hangfire.io](https://www.hangfire.io/) |
-
----
-
-## 2. Technology stack (decided)
-
-| Layer | Choice | Why |
-|---|---|---|
-| Language/runtime | **Python 3.13** (`python:3.13-slim` image) | Richest AI/media ecosystem (openai SDK, pytesseract, ffmpeg); team works cross-stack |
-| API framework | **FastAPI 0.143** + Uvicorn | Async, OpenAPI/Swagger out of the box, Pydantic validation, SSE via Starlette |
-| Background worker | Same codebase, **separate container process** (`python -m app.worker`) | Logical separation without microservices |
-| Job queue | **PostgreSQL table + `FOR UPDATE SKIP LOCKED`** | Postgres is already required; no Redis/RabbitMQ needed at prototype scale |
-| Database | **PostgreSQL** — compose service locally; `DATABASE_URL` env var → remote/Render Postgres in deployment | Team has a remote Postgres; JSON columns, `LISTEN/NOTIFY` available for free later |
-| ORM / migrations | **SQLAlchemy 2.0 + Alembic** | De-facto Python standard, async support |
-| AI provider | **Groq** (OpenAI-compatible SDK) behind a provider interface + **deterministic stub** for offline/dev/tests | Free tier verified; swapping to OpenAI later is a config change; stub keeps CI/demo zero-cost |
-| Media processing | **FFmpeg + Tesseract** (`eng`, `nep` language data) installed **inside the container** | No host-level installs required from any developer |
-| Media/original storage | Postgres + local volume (`/data/media`); S3-compatible object storage noted as the production path | Render free tier has ephemeral disks — documented limitation |
-| Delivery | REST + **Server-Sent Events** (`/events`); DB-polling (≈200 ms) for cross-process notify in M1 | Meets <2s delivery objective; `LISTEN/NOTIFY` upgrade planned in M3 |
-| Auth | API keys per client/subscriber (hashed, in DB), `Authorization: Bearer` | Simple, real, demonstrable |
-| Local dev | **Docker Compose**: `api` + `worker` + `migrate` + `db`, healthchecks, volumes, `.env` config | `docker compose up --build` is the only prerequisite |
-| Deployment | **Render**: Web Service (api) + Background Worker (worker) from the *same image*, different start command | Matches the shared-codebase / separate-process requirement |
-
-### Rejected alternatives (fair summary)
-
-- **C# / ASP.NET Core** — genuinely strong given the team's background; lost on AI/media library
-  ecosystem and explicit project direction. (.NET 10 LTS is supported to Nov 2028.)
-- **Node / TypeScript** — weaker media/ML tooling for this workload.
-- **SQLite** — viable zero-install option, but a remote Postgres is already available and closer
-  to production.
-- **Redis / RabbitMQ / Celery broker** — extra infrastructure not justified at prototype scale;
-  a Postgres-backed queue covers retries and dead-letter semantics.
-- **Ollama / local models** — not installed on the host; CPU-bound transcription/OCR would be slow.
-- **WebSockets / mobile push (FCM/APNs)** — more capability than needed for one-way news push;
-  documented as future work.
-
----
-
-## 3. Architecture
-
-Modular monolith: one repository, one container image, two processes (API and worker) plus the
-database. Stages are separated by clear module boundaries, not network calls.
-
-```
-NewNews/
-├── Dockerfile              # single image: ffmpeg, tesseract-ocr + eng/nep data, python deps
-├── docker-compose.yml      # api + worker + migrate + db, volumes, healthchecks
-├── .env.example
-├── pyproject.toml          # uv-managed
-├── alembic/                # migrations (versions/ generated via autogenerate)
-├── app/
-│   ├── api/                # FastAPI routers: ingest, news, clients, events (SSE), health
-│   ├── worker/             # pipeline runner: polls jobs table, executes stages
-│   ├── pipeline/           # extraction, dedupe, ai (stub + groq), validation,
-│   │                       #   enrichment, matching, queue, audit, states
-│   ├── core/               # config, db sessions, logging + correlation IDs, security
-│   ├── models/             # SQLAlchemy models
-│   └── seed.py             # demo client + subscription bootstrap
-├── tests/                  # unit + integration (integration needs TEST_DATABASE_URL)
-├── docs/
-│   ├── requirements.md     # scope, FRs, NFRs, acceptance criteria
-│   ├── architecture.md     # modules, data flow, interfaces, boundaries
-│   ├── data-model.md       # entities, state machine, provenance, versioning
-│   ├── roadmap.md          # milestones and status
-│   └── decisions/          # ADR-0001..0006
-├── mobile/                 # (M5) Expo / React Native data-collection app
-└── README.md
-```
-
-### Pipeline flow
-
-```
-Ingestion → Extraction/Processing → AI Validation → Classification/Enrichment
-          → Persistence/Audit → Client Matching → Delivery (REST + SSE)
-```
-
-- Every item carries a **state machine** (e.g. `received → processing → validated → enriched →
-  eligible → delivered`, with `duplicate`, `needs_review`, `failed` branches). Failed, uncertain,
-  or duplicate items never silently appear as verified news.
-- A **correlation ID** follows each item across all stages; structured logs record every stage
-  outcome; audit events are persisted.
-- **AI outputs are assessments, not proof of truth** — evidence, confidence, validation status,
-  and editorial decisions are stored separately.
-- **Idempotency:** ingestion dedupes on content hash + source key; pipeline stages are safe to
-  retry; failed jobs go to a dead-letter state after bounded retries.
-
-### Latency objective
-
-< 2 s from eligibility to receipt on a connected subscriber. Measured as: *time an item is
-marked `eligible` → SSE event received by a subscribed client* (p95). Long-running stages
-(transcription, OCR, translation, editorial review) are asynchronous and explicitly excluded
-from this budget.
-
----
-
-## 4. Step-by-step plan (milestones)
-
-### Progress at a glance
+## The pipeline, simply
 
 ```mermaid
-flowchart TB
-    classDef done fill:#dcf5e3,stroke:#1a7f37,color:#0a3d1c
-    classDef here fill:#fff3cd,stroke:#d97706,stroke-width:2px,color:#5b3a00
-    classDef todo fill:#f1f3f5,stroke:#868e96,color:#495057
-
-    M0["<b>M0 · Docs &amp; decisions</b> — ✅ DONE<br/>requirements · architecture · data-model · roadmap<br/><b>ADR-0001</b> Python/FastAPI &nbsp;·&nbsp; <b>ADR-0002</b> PostgreSQL<br/><b>ADR-0003</b> Postgres job queue &nbsp;·&nbsp; <b>ADR-0004</b> Groq behind provider interface<br/><b>ADR-0005</b> one image, two processes &nbsp;·&nbsp; <b>ADR-0006</b> REST + SSE (not WebSockets)"]:::done
-
-    M1["<b>M1 · Runnable vertical slice</b> — ✅ DONE (verified 2026-10-14)<br/>ingest → extract → validate → enrich → match → SSE in <b>117 ms</b><br/>state machine · SKIP LOCKED queue · API-key auth · audit trail<br/><b>FR-01…FR-12</b> · 42 tests · <code>docker compose up --build</code>"]:::done
-
-    subgraph M2G["<b>M2 · Real AI + media</b> — ✅ COMPLETE (2026-10-15), 75 tests"]
-        direction LR
-        W1["<b>W1</b> Groq AI ✅<br/>structured output,<br/>TTL cache, ne↔en<br/><b>ADR-0004</b>"]:::done
-        W4["<b>W4</b> Near-dup ✅<br/>shingle + Jaccard<br/><b>FR-13</b>"]:::done
-        W5["<b>W5</b> Review queue ✅<br/>approve / reject<br/><b>FR-14</b>"]:::done
-        W23["<b>W2/W3</b> Media ✅<br/>upload + extract_media:<br/>PDF→OCR (mojibake too),<br/>image OCR, Whisper<br/><b>FR-15</b><br/>⏳ live Whisper test<br/>needs an audio clip"]:::done
-    end
-
-    M3["<b>M3 · Hardening &amp; delivery</b> — ⬜ REMAINS<br/>Postgres LISTEN/NOTIFY (replace 200 ms polling)<br/>latency harness p50/p95/p99 · operator retry workflow · dashboards"]:::todo
-
-    M4["<b>M4 · Deployment (Render)</b> — 🟡 IN PROGRESS — <b>you are here</b><br/>api deployed (newnews-t54x.onrender.com) but returns <b>502</b><br/>⬜ Render env vars (Aiven URL → postgresql+psycopg scheme)<br/>⬜ migrate-on-deploy · ⬜ worker background service<br/>⬜ ephemeral disk → S3-compatible object storage"]:::here
-
-    M5["<b>M5 · Mobile (Expo / React Native)</b> — ⬜ REMAINS<br/><code>mobile/</code> app: submit text + camera photo via ingest API<br/>combined multipart ingest (item + media in one request)"]:::todo
-
-    M0 ==> M1 ==> M2G ==> M3 ==> M4 ==> M5
+flowchart LR
+    A["Raw input<br/>article · screenshot<br/>scan · audio"] --> B["Extract<br/>PDF text · OCR · transcription"]
+    B --> C["Assess<br/>AI credibility"]
+    C -->|confident| D["Enrich<br/>topics · places · summary"]
+    C -.->|uncertain| R["Human review<br/>approve / reject"]
+    R --> D
+    D --> E["Match<br/>client subscriptions"]
+    E --> F["Deliver<br/>SSE push + REST"]
 ```
 
-Legend: ✅ done & verified · 🟡 in progress · ⬜ not started · ⏳ waiting on input.
-FR numbers = `docs/requirements.md` · ADR numbers = `docs/decisions/` ·
-W numbers = workstreams inside M2 · M numbers = milestones below.
+Three promises hold at every step:
 
-### M0 — Documentation & architecture
-- [x] Inspect repository and environment
-- [x] Verify external claims (Groq free tier, Render Docker support, FastAPI versions)
-- [x] Decide stack and record rejected alternatives
-- [x] Write README with plan and decisions
-- [x] `docs/requirements.md`, `docs/architecture.md`, `docs/data-model.md`, `docs/roadmap.md`
-- [x] ADRs 0001–0006 in `docs/decisions/`
-- [x] `.gitignore`, `.env.example`
+- **Nothing uncertain ships** — low-confidence items stop at the review gate, never the feed.
+- **Everything is traceable** — one correlation ID per item, one audit row per stage, a strict
+  state machine guards every status change.
+- **The demo is free and offline** — the default AI is a deterministic stub; live Groq is a
+  config switch (`AI_PROVIDER=groq`).
 
-### M1 — Runnable vertical slice (first build milestone)
-1. [x] Install Docker Engine + Compose plugin on the host; verify `docker compose` works.
-2. [x] Scaffold project (`uv`, FastAPI skeleton, SQLAlchemy, Alembic, config via env).
-3. [x] `Dockerfile` (installs `ffmpeg`, `tesseract-ocr`, `tesseract-ocr-eng`, `tesseract-ocr-nep`)
-   and `docker-compose.yml` (api, worker, migrate, db + healthchecks + volumes).
-4. [x] Data model + migration: news items, media assets, pipeline jobs, clients, subscriptions,
-   audit events.
-5. [x] State machine + Postgres-backed job queue (`FOR UPDATE SKIP LOCKED`, retries, dead-letter).
-6. [x] Ingestion API (`POST /api/v1/items`, text first) with API-key auth + correlation IDs.
-7. [x] Pipeline stages with **stub AI provider** (deterministic heuristics) end-to-end.
-8. [x] Client matching (topics, locations, exclusions, urgency) + REST retrieval + SSE delivery.
-9. [x] Tests alongside each feature; `pytest` green (42 tests, incl. integration against Postgres).
-10. [x] Verify containers build and start; exec into container and confirm `ffmpeg -version` and
-    `tesseract --list-langs` (including `nep`) — verified 2026-10-14 (ffmpeg 7.1.5; eng, nep, osd).
+## System choices
 
-**M1 acceptance criteria**
-- `docker compose up --build` brings up healthy `api`, `worker`, `db` with no host installs of
-  ffmpeg/tesseract.
-- Submit a text news item via Swagger/curl → it flows through all stages → matched client
-  receives it via SSE in < 2 s after eligibility.
-- Duplicate submissions return the existing item (`200` + `duplicate: true`) without a second
-  pipeline run; low-confidence items go to `needs_review`; stage failures go to `failed` —
-  unverified content is never surfaced as news.
-- ffmpeg and Tesseract (with Nepali data) verified inside the container.
-- `pytest` passes; docs synchronized with implementation.
+| Layer | Choice | Why | Decision |
+|---|---|---|---|
+| Language / API | **Python 3.13 + FastAPI** | async + typed, OpenAPI out of the box, the richest AI/media ecosystem | [ADR-0001](docs/decisions/ADR-0001.md) |
+| Data store | **PostgreSQL** — one database for data *and* queue | JSON columns, `LISTEN/NOTIFY` available later, zero extra infrastructure | [ADR-0002](docs/decisions/ADR-0002.md) |
+| Job queue | **Postgres table + `FOR UPDATE SKIP LOCKED`** | retries and dead-letter semantics without Redis/Celery | [ADR-0003](docs/decisions/ADR-0003.md) |
+| AI | **Groq** behind a provider interface; deterministic stub by default | free tier; CI and demos at zero cost; provider swappable | [ADR-0004](docs/decisions/ADR-0004.md) |
+| Shape | **Modular monolith** — one image, two processes (`api`, `worker`) | separation without microservices | [ADR-0005](docs/decisions/ADR-0005.md) |
+| Delivery | **REST pull + SSE push** (200 ms DB poll) | 117 ms measured against a < 2 s budget; no WebSockets needed | [ADR-0006](docs/decisions/ADR-0006.md) |
+| Media | **pypdf → Tesseract (`nep`+`eng`) → Groq Whisper**, all in-container | Nepali scans included — even custom-font PDFs whose text layer is mojibake get OCR'd | [FR-15](docs/requirements.md) |
 
-### M2 — Real AI + media extraction
-- [x] Groq integration behind the provider interface: explainable credibility score,
-  classification, summary, translation (ne ↔ en) — one structured-output call per article,
-  `AI_PROVIDER=groq` (stub stays the offline/CI default).
-- [x] Duplicate/near-duplicate detection: exact content hash at ingest + fuzzy shingle/Jaccard
-  stage (≥ 0.85 → `duplicate` with `is_duplicate_of`, 0.6–0.85 flagged `near_duplicate_suspect`).
-- [x] Review-queue workflow: admin `GET /api/v1/review`, item detail with audit timeline,
-  approve (resumes at enrichment) / reject (terminal `rejected`, reason audited).
-- [x] PDF text extraction; image OCR (Tesseract); audio/video transcription (Groq Whisper);
-  `POST /api/v1/items/{id}/media` upload endpoint. **Done** — `extract_media` is the new
-  FIRST_STAGE (PDF text layer → OCR fallback for scans and custom-font mojibake; images OCR
-  with `nep+eng`; audio/video transcribed via Whisper when `AI_PROVIDER=groq`). Live-verified:
-  screenshot → Unicode Devanagari; 12 MB Gorkhapatra PDF → mojibake detected → OCR →
-  133 K chars clean Devanagari → Groq → `needs_review` → approved → Nepali summary → `eligible`.
+Rejected alternatives (C#/.NET, Node, SQLite, Redis/Celery, local models, WebSockets) and
+every full rationale live in [`docs/decisions/`](docs/decisions/README.md).
 
-### M3 — Hardening & delivery
-- Retry/backoff, dead-letter handling, partial-failure semantics.
-- Upgrade cross-process notify to Postgres `LISTEN/NOTIFY`.
-- Latency measurement harness reporting p50/p95/p99 for the defined metric.
-- Health checks, readiness probes, structured logging dashboards.
-
-### M4 — Deployment (Render)
-- Render Blueprint: Web Service (api) + Background Worker (worker) from one image.
-- Remote/managed Postgres via `DATABASE_URL`; secrets via Render environment variables.
-- Documented limitation: free-tier ephemeral disk → media persistence needs a disk or
-  S3-compatible object storage (paid tier).
-
-### M5 — Mobile data collection (Expo / React Native)
-- `mobile/` Expo Go app: submit news text + camera photo through the public ingestion API.
-- Kept thin — all processing lives server-side.
-
----
-
-## 5. Setup (validated in M1)
+## Quick start
 
 ```bash
-# 1. Configure environment
-cp .env.example .env        # add GROQ_API_KEY when available (optional for M1 stub mode)
+cp .env.example .env                      # add GROQ_API_KEY for live AI (optional)
+docker compose up --build                 # migrate → api + worker + postgres
+docker compose exec api python -m app.seed   # demo client key (printed once)
+open http://localhost:8000/docs           # interactive API docs
 
-# 2. Build and start everything (migrations run first, then API + worker + Postgres)
-docker compose up --build
+export KEY=nn_...                         # the key printed above
 
-# 3. Verify tooling inside the container (no host installs needed)
-docker compose exec api ffmpeg -version
-docker compose exec api tesseract --list-langs   # expect: eng, nep
-
-# 4. Seed a demo client — prints an API key (shown once, store it)
-docker compose exec api python -m app.seed
-export KEY=nn_...   # paste the printed key
-
-# 5. Open interactive API docs
-open http://localhost:8000/docs
-
-# 6. Ingest a text item (202 → pipeline runs in the worker)
+# ingest a story — then watch it arrive on SSE (< 2 s after becoming eligible)
 curl -X POST http://localhost:8000/api/v1/items \
   -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
-  -d '{"title":"Cabinet approves flood relief","body":"Kathmandu, 14 October 2026 — ...","source_key":"demo-1"}'
-
-# 7. Watch it arrive via SSE in < 2 s after eligibility (keep this running)
+  -d '{"body":"Kathmandu, 16 October 2026 — ...","source_key":"demo-1"}'
 curl -N http://localhost:8000/api/v1/events -H "Authorization: Bearer $KEY"
 
-# 8. Run the tests (unit + integration) inside the container
-docker compose exec -T db createdb -U newnews newnews_test
-docker compose exec -T -e TEST_DATABASE_URL=postgresql+psycopg://newnews:newnews@db:5432/newnews_test api pytest
-
-# Or run tests on the host against local PostgreSQL 16 (port 5432;
-# the compose DB is published on host port 5433 to avoid the conflict):
-#   TEST_DATABASE_URL=postgresql+psycopg://newnews:newnews@localhost:5432/newnews_test uv run pytest
+# tests: unit run offline; integration needs a second Postgres database
+TEST_DATABASE_URL=postgresql+psycopg://newnews:newnews@localhost:5432/newnews_test uv run pytest
 ```
 
----
+## The API
 
-## 6. Open decisions / next actions
+| Endpoint | Auth | Purpose |
+|---|---|---|
+| `POST /api/v1/items` | client key | idempotent ingest — `202` new, `200` duplicate |
+| `POST /api/v1/items/{id}/media` | client key | attach a file while the item is `received`; extraction runs before assessment |
+| `GET /api/v1/news(?ack=true)` | client key | pull feed, acknowledge deliveries |
+| `GET /api/v1/items/{id}` | client key | one item with full detail |
+| `GET /api/v1/events` | client key | SSE stream — `Last-Event-ID` resume, 15 s heartbeats |
+| `POST/GET /api/v1/clients…` | admin key | mint / inspect clients and subscriptions |
+| `GET /api/v1/review…` + `approve`/`reject` | admin key | editorial queue for uncertain items |
+| `/healthz` · `/readyz` · `/docs` | none | liveness · readiness (redacted DB errors) · OpenAPI |
 
-- [x] Docker Engine installation on the host — done (Docker 29.1.3 + Compose 2.40.3).
-- [x] Local PostgreSQL 16 for migrations/integration tests — done (compose DB on host port 5433).
-- [ ] Provide `GROQ_API_KEY` when ready for M2 (never committed; env var only).
-- [ ] Confirm remote Postgres credentials for the M4 deployment (`DATABASE_URL`).
-- [ ] Render free-tier constraints (ephemeral disk, spin-down) accepted for the demo.
+## Under the hood
 
----
+- **Stages**: `extract_media → extract → dedupe → validate → enrich → match`. Each stage is a
+  job row claimed with `FOR UPDATE SKIP LOCKED`; retries back off exponentially and
+  dead-letter into item status `failed`. Only `transition()` may change an item's status
+  (`received → processing → validated → enriched → eligible → delivered`, plus `duplicate`,
+  `needs_review`, `rejected`, `failed`).
+- **Idempotency**: ingest dedupes on `(source_key, sha256(normalized title+body))` with a
+  unique constraint and an `IntegrityError` fallback for races; the `dedupe` stage catches
+  reworded copies (3-gram shingles, Jaccard ≥ 0.85 → linked `duplicate`).
+- **AI as assessment**: one JSON-schema-constrained Groq call produces score, confidence,
+  rationale, topics, locations, urgency and summary *together* (route at 0.75 / 0.45;
+  input capped at `AI_MAX_INPUT_CHARS=8000` for the free tier's TPM).
+- **Media**: PDF text layer first; a scan — or a custom-font layer with code-punctuation
+  density > 3 % (Preeti/Krutidev-style encodings) — falls back to rasterizing pages
+  (pypdfium2) and OCR. Extracted text is stored on the asset and appended to the body once,
+  so dedupe and the AI both see it.
+- **SSE**: at-most-once delivery (marked `sent` before the frame is written); the delivery
+  ID doubles as the `Last-Event-ID` cursor; pure-ASGI middleware so streams never buffer.
+- **Security**: client keys look like `nn_<prefix>_<secret>`, stored as SHA-256 and verified
+  with `hmac.compare_digest`; admin routes require `ADMIN_API_KEY`. Every tunable lives in
+  `Settings` (`.env.example` lists them all).
+- **Observability**: JSON logs; the correlation ID flows header → item → audit rows → worker.
+
+## Tests & CI
+
+77 tests: unit (offline — hashing, state machine, matching, dedupe, mojibake detection, stub
+determinism) and integration (schema-per-test Postgres — full pipeline, review workflow,
+media upload → extraction, SSE delivery). OCR tests self-skip where `tesseract` is absent and
+run inside the Docker image. CI runs lint + the full suite against `postgres:17` (~1 min)
+plus a Docker build that verifies `ffmpeg`/`tesseract (nep)` are in the image.
+
+## Project documentation
+
+- **Plan & progress** → [`docs/roadmap.md`](docs/roadmap.md) — milestones, what's done,
+  what's next
+- [Requirements (FR/NFR)](docs/requirements.md) · [Architecture](docs/architecture.md) ·
+  [Data model & state machine](docs/data-model.md)
+- [Decisions](docs/decisions/README.md) — ADR-0001…0007 + rejected alternatives
+- [Research findings](docs/phase0-findings.md) — verified environment facts from Phase 0
 
 *License: MIT (see `LICENSE`).*

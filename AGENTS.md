@@ -5,12 +5,13 @@
 > endpoint, new setting, decisions reversed). If this file and the code disagree, the code
 > wins — then fix this file.
 
-**Status (2026-10-15): M1 complete & verified; M2 COMPLETE — W1 (Groq), W4 (near-dup),
-W5 (review queue), W2/W3 (media upload + extraction) all landed.** Next: M4 Render
-deployment (service exists at newnews-t54x.onrender.com but 502 — env vars / migrate /
-worker service still pending); Whisper E2E still awaits an audio clip from the user.
-Full plan: `README.md` §4 · Detailed docs: `docs/` (requirements, architecture, data-model,
-roadmap, decisions/ADR-0001..0006).
+**Status (2026-10-16): M1–M2 complete & verified; M4 (Render cloud deploy) IN PROGRESS —
+web service live + API-managed env/healthcheck/pre-deploy; BLOCKED on a valid Aiven
+connection string (old hostname no longer resolves). M3 slimmed per new ADR-0007;
+M5 next.** README was rewritten 2026-10-16 (descriptive, layman→technical; the plan/progress
+now live in `docs/roadmap.md`).
+Full plan: `docs/roadmap.md` · Detailed docs: `docs/` (requirements, architecture, data-model,
+decisions/ADR-0001..0007, phase0-findings).
 
 ---
 
@@ -96,7 +97,8 @@ tests/                     # conftest (db schema-per-test, api, admin_headers fi
                            #   make_pdf_bytes PDF builder), 14 modules; integration needs
                            #   TEST_DATABASE_URL else skips; OCR tests skip without tesseract
 alembic/                   # env.py reads settings.database_url; initial rev applied
-docs/                      # requirements, architecture, data-model, roadmap, ADRs
+docs/                      # requirements, architecture, data-model, roadmap (plan+progress),
+                           #   decisions/ (ADR-0001..0007), phase0-findings
 ```
 
 ## 4. Invariants & conventions (follow these!)
@@ -174,8 +176,8 @@ Endpoints: `POST/GET /api/v1/items`, `POST /api/v1/items/{id}/media` (multipart,
   mounted on api+worker at `/data/media`
 - ffmpeg 7.1.5 + tesseract `eng, nep, osd` inside container (host has **no** tesseract/ffmpeg
   → those 2 OCR tests skip on host and pass in-container)
-- 75 tests total: 73 pass + 2 OCR-skip on host with `TEST_DATABASE_URL`; ruff clean
-  (42 M1 + 7 Groq + 12 dedupe/review + 14 media W2/W3)
+- 77 tests total: 75 pass + 2 OCR-skip on host with `TEST_DATABASE_URL`; ruff clean
+  (42 M1 + 7 Groq + 12 dedupe/review + 14 media W2/W3 + 2 readyz/redaction)
 - Live E2E M1: eligible→SSE receipt measured **117 ms** (budget < 2 s)
 - Live E2E M2 media: screenshot PNG → Unicode Devanagari OCR (753 chars); 12.4 MB Gorkhapatra
   PDF (Preeti/custom-font layer → mojibake) → OCR → 133 K chars clean Devanagari → `ne` →
