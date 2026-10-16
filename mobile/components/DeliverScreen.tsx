@@ -63,24 +63,19 @@ export default function DeliverScreen({ settings }: { settings: Settings }) {
   }
 
   useEffect(() => {
-    if (!live) {
-      stopRef.current?.();
-      stopRef.current = null;
-      setStream("off");
-      return;
-    }
-    setStream("connecting…");
-    stopRef.current = subscribeDeliveries(
+    if (!live) return;
+    const stop = subscribeDeliveries(
       settings,
       () => {
         setStream("live — update received, reloading…");
         void reload().then(() => setStream("live"));
       },
       (errorMessage) => setStream(`stream error: ${errorMessage}`),
+      () => setStream("live"),
     );
-    setStream("live");
+    stopRef.current = stop;
     return () => {
-      stopRef.current?.();
+      stop();
       stopRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -90,7 +85,13 @@ export default function DeliverScreen({ settings }: { settings: Settings }) {
     <View style={T.screen}>
       <Text style={T.h1}>Deliveries</Text>
       <View style={T.row}>
-        <Button title={live ? "Stop live" : "Go live (SSE)"} onPress={() => setLive((v) => !v)} />
+        <Button
+          title={live ? "Stop live" : "Go live (SSE)"}
+          onPress={() => {
+            if (!live) setStream("connecting…");
+            setLive((v) => !v);
+          }}
+        />
         <Button title="Reload (REST)" onPress={() => void reload()} />
       </View>
       {live ? <Text style={styles.stream}>● {stream}</Text> : null}

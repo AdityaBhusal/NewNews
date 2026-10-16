@@ -23,17 +23,17 @@ npx expo start          # scan the QR with Expo Go (same Wi-Fi for LAN use)
 
 ## Manual end-to-end (the demo)
 
-1. **Ingest tab** — write a story, snap a photo (Camera) or pick one (Gallery), Submit.
-   Note the item id. If the worker beats you to it, media upload 409s — resubmit (the
-   attach-while-`received` race is documented in `docs/requirements.md` FR-15).
-2. **Website `/live`** (same client key) — keep it open in a browser.
-3. **Review tab** — Reload queue → open the item (score, certainty, AI rationale, audit
-   trail) → Approve with a note (or Reject with a reason).
-4. **Website** — the approved item arrives on `/live` with its `editorially_reviewed`
-   badge; `/feed` shows it on reload.
-5. **Track tab** — paste any item id: status, badges, and the audit journey. Tap
-   **Go live** to hold the SSE stream open — any delivery refetches the item, so
-   approvals and stage transitions appear without refreshing.
+1. **Ingest tab** — tap 🎲 for a catalog story (stub-predicted certainty shown) or write
+   your own, snap a photo (Camera) or pick one (Gallery), Submit. Copy the ID if you
+   like — **Track is already prefilled** and auto-tracks it. If the worker beats the
+   upload, media 409s — resubmit (the attach-while-`received` race, FR-15).
+2. **Track tab** — always live: status, certainty + editorial badges, AI confidence,
+   ingest→eligible→delivered latencies, editor approval note, pipeline stepper, media
+   list, full audit journey. Any delivery on your key refetches it over SSE.
+3. **Review tab** — Reload queue → open the item (score, certainty, rationale, attached
+   media with extraction status, audit) → Approve with a note (or Reject with a reason).
+4. **Deliver tab** — Go live (SSE push) or Reload (REST pull) to receive with badges.
+5. **Website** — same over `/live`, `/feed`, `/track` in a browser.
 
 Photo OCR path: photograph any Nepali/English printed text — `extract_media` OCRs it
 before the AI assessment sees it.

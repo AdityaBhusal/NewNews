@@ -166,6 +166,7 @@ export function subscribeDeliveries(
   settings: Settings,
   onNews: (deliveryId: number) => void,
   onError?: (message: string) => void,
+  onOpen?: () => void,
 ): () => void {
   const source = new EventSource(`${settings.baseUrl}/api/v1/events`, {
     headers: { Authorization: `Bearer ${settings.clientKey}` },
@@ -187,6 +188,9 @@ export function subscribeDeliveries(
     onError?.(
       event.type === "error" && event.message ? String(event.message) : "stream error",
     );
+  });
+  source.addEventListener("open", () => {
+    onOpen?.();
   });
   return () => {
     source.removeAllEventListeners();

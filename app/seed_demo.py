@@ -117,23 +117,40 @@ def glimpses(rng: random.Random, tag: str) -> tuple[str, str]:
                       "politics": "the vote count", "crime": "the arrests",
                       "health": "the hospital admissions"}.get(beat[1], "the development")
         amount = rng.randint(20, 900)
+        first_settlement = rng.choice(PLACES)
+        second_settlement = rng.choice(PLACES)
         body = wire_body(
             place,
             f"The {beat[0]} worth {amount} million rupees, ministers said.",
-            f"Work on {topic_word} begins next month across settlements in {rng.choice(PLACES)} and {rng.choice(PLACES)}.",
+            f"Work on {topic_word} begins next month across settlements "
+            f"in {first_settlement} and {second_settlement}.",
             day,
             tag,
         )
         if beat[1] == "disaster" and rng.random() < 0.5:
-            body += " BREAKING: rescue teams report people missing after the urgent landslide, officials said."
+            body += (
+                " BREAKING: rescue teams report people missing "
+                "after the urgent landslide, officials said."
+            )
         return beat[0].capitalize(), body
     if roll < 0.65:  # plain bulletin: review queue, certainty medium
         subjects = [
-            ("budget plan", "The government announced a new budget plan amid opposition protests in parliament."),
+            (
+                "budget plan",
+                "The government announced a new budget plan amid opposition "
+                "protests in parliament.",
+            ),
             ("bus park", f"A new bus park opened in {place} with room for 300 vehicles."),
             ("gold price", "Gold prices hit a new record in the Nepali market on Friday."),
-            ("air quality", f"Air quality in {place} worsened this week as brick kilns resumed firing."),
-            ("border talks", "India and Nepal resumed diplomatic talks on border infrastructure in New Delhi."),
+            (
+                "air quality",
+                f"Air quality in {place} worsened this week as brick kilns resumed firing.",
+            ),
+            (
+                "border talks",
+                "India and Nepal resumed diplomatic talks on border "
+                "infrastructure in New Delhi.",
+            ),
             ("cricket win", f"Nepal won a last-ball cricket thriller at the {place} stadium."),
             ("school exams", f"Board exams began for 40,000 students across {place} district."),
             ("film award", f"A Nepali film shot in {place} won the jury award at the festival."),
@@ -170,7 +187,7 @@ async def ensure_clients(session) -> None:
             await session.execute(select(Client).where(Client.name == name))
         ).scalar_one_or_none()
         if existing is not None:
-            print(f"client exists: {name} ({existing.id}) — key not recoverable, reuse the original")
+            print(f"client exists: {name} ({existing.id}) — key not recoverable")
             continue
         full_key, prefix, key_hash = generate_api_key()
         client = Client(name=name, api_key_prefix=prefix, api_key_hash=key_hash)

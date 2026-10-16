@@ -31,7 +31,7 @@ export default function IngestScreen({
 }) {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
-  const [sourceKey, setSourceKey] = useState(`app-${Date.now()}`);
+  const [sourceKey, setSourceKey] = useState("");
   const [photo, setPhoto] = useState<Picked | null>(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState("");
@@ -123,8 +123,13 @@ export default function IngestScreen({
         multiline
         placeholder="Kathmandu, …"
       />
-      <Text style={T.label}>Source key</Text>
-      <TextInput style={T.input} value={sourceKey} onChangeText={setSourceKey} />
+      <Text style={T.label}>Source key (blank = auto)</Text>
+      <TextInput
+        style={T.input}
+        value={sourceKey}
+        onChangeText={setSourceKey}
+        placeholder="auto-generated on submit"
+      />
       <View style={T.row}>
         <Button title="Camera" onPress={() => void pick(true)} />
         <Button title="Gallery" onPress={() => void pick(false)} />

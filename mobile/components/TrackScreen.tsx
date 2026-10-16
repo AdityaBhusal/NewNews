@@ -111,31 +111,25 @@ export default function TrackScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [suggestedId]);
 
-  // Always live while an item is tracked: any delivery refetches it.
+  // Always live while a non-terminal item is tracked: any delivery refetches
+  // it. Labels come from stream callbacks + render derivation — never setState
+  // in the effect body.
+  const terminal = !!item && TERMINAL.has(item.status);
   useEffect(() => {
-    stopRef.current?.();
-    stopRef.current = null;
-    if (!item || !settings.clientKey) {
-      setStream(item ? "off (no client key)" : "off");
-      return;
-    }
-    if (TERMINAL.has(item.status)) {
-      setStream("terminal — no further stages");
-      return;
-    }
+    if (!item || terminal || !settings.clientKey) return;
     const id = item.id;
-    setStream("connecting…");
-    stopRef.current = subscribeDeliveries(
+    const stop = subscribeDeliveries(
       settings,
       () => {
         setStream("update received, refetching…");
         void track(id).then(() => setStream("live"));
       },
       (errorMessage) => setStream(`stream error: ${errorMessage}`),
+      () => setStream("live"),
     );
-    setStream("live");
+    stopRef.current = stop;
     return () => {
-      stopRef.current?.();
+      stop();
       stopRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -161,7 +155,16 @@ export default function TrackScreen({
         />
         <Button title="Track" onPress={() => void track(itemId)} />
       </View>
-      <Text style={styles.stream}>● SSE: {stream}</Text>
+      <Text style={styles.stream}>
+        ● SSE:{" "}
+        {!item
+          ? "off"
+          : !settings.clientKey
+            ? "off (no client key)"
+            : terminal
+              ? "terminal — no further stages"
+              : stream}
+      </Text>
       {message ? <Text style={T.small}>{message}</Text> : null}
       {item && cert && (
         <View style={T.card}>
