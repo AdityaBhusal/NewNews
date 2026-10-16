@@ -34,6 +34,7 @@ COPY alembic.ini ./
 COPY alembic ./alembic
 COPY app ./app
 COPY tests ./tests
+COPY scripts ./scripts
 
 RUN mkdir -p /data/media \
     && useradd --create-home --uid 1000 newnews \
