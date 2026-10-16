@@ -30,7 +30,7 @@ flowchart TB
 
     M4["<b>M4 · Deployment (Render)</b> — 🟡 IN PROGRESS — <b>you are here</b><br/>api deployed (newnews-t54x.onrender.com), auto-deploy on push<br/>✅ env vars + pre-deploy migrate + healthcheck (Render API)<br/>⬜ DATABASE_URL → remote Postgres (Aiven hostname expired → new service)<br/>⬜ worker service from the same image · ⬜ remote E2E verification<br/>⬜ ephemeral disk → S3-compatible object storage"]:::here
 
-    M5["<b>M5 · Mobile (Expo / React Native)</b> — ⬜ REMAINS<br/><code>mobile/</code> app: submit text + camera photo via ingest API<br/>combined multipart ingest (item + media in one request)"]:::todo
+    M5["<b>M5 · Mobile + delivery site</b> — 🟡 IN PROGRESS — <b>you are here</b><br/><code>mobile/</code> Expo app: Ingest tab + Review tab (one app)<br/>website: <code>/feed</code> (REST) + <code>/live</code> (SSE)<br/>⬜ your manual E2E from the phone"]:::here
 
     M0 ==> M1 ==> M2G ==> M3 ==> M4 ==> M5
 ```
@@ -175,9 +175,17 @@ FR numbers = `docs/requirements.md` · ADR numbers = `docs/decisions/` · W numb
 - [ ] Media on the free tier: ephemeral disk accepted/documented → S3-compatible object
   storage as the production path (remote OCR upload test still to run)
 
-## M5 — Mobile data collection (Expo / React Native)
+## M5 — Mobile data collection (Expo / React Native) — **in progress (scaffolded 2026-10-17)**
 
-- [x] `mobile/` Expo Go app: submit news text + camera photo through the public ingestion API
+- [x] `mobile/` Expo Go app (SDK 58, TypeScript): **Ingest tab** (title/body + camera/gallery
+  photo → `POST /items` → `POST /items/{id}/media`) + **Review tab** in the same app
+  (queue → detail with score/certainty/rationale/audit → approve/reject) + Settings
+  (base URL + keys, persisted on-device). No navigation library, no custom native
+  modules — runs in Expo Go as-is; manual script in `mobile/README.md`
+- [x] Delivery website as static API-served pages (no build step): `/feed` (REST pull) +
+  `/live` (SSE push), both rendering `certainty_label` + `editorially_reviewed` badges;
+  `?api_key=` query auth for browser `EventSource` (keys excluded from request logs)
+- [ ] Manual E2E from the app: ingest → website `/live` → approve in Review tab → delivery
 - [ ] Kept thin — all processing lives server-side
 
 ---
