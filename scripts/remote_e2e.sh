@@ -26,11 +26,11 @@ CLIENT_JSON=$(curl -sf -X POST "$BASE_URL/api/v1/clients" \
 KEY=$(printf '%s' "$CLIENT_JSON" | py 'import sys,json;print(json.load(sys.stdin)["api_key"])')
 echo " client key acquired (nn_…)"
 
-step "ingest a text item"
+step "ingest a text item (body carries the run stamp so dedupe treats reruns as new)"
 STAMP=$(date +%s)
 ID=$(curl -sf -X POST "$BASE_URL/api/v1/items" \
   -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
-  -d "{\"body\":\"Kathmandu, $(date +'%d %B %Y') — The cabinet approved flood relief worth 200 million rupees for six districts, ministers said on Tuesday. Construction and distribution work begins next month.\",\"source_key\":\"remote-e2e-$STAMP\"}" \
+  -d "{\"body\":\"Kathmandu, report $STAMP — The cabinet approved flood relief worth 200 million rupees for six districts, ministers said on Tuesday. Construction and distribution work begins next month.\",\"source_key\":\"remote-e2e-$STAMP\"}" \
   | py 'import sys,json;print(json.load(sys.stdin)["id"])')
 echo " item $ID"
 
