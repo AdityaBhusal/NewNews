@@ -97,12 +97,25 @@ export interface ReviewItem {
   validation_rationale: string | null;
   certainty_label: string;
   editorially_reviewed: boolean;
+  reviewed_at: string | null;
   topics: string[];
+  urgency: string;
+  eligible_at: string | null;
+  delivered_at: string | null;
   created_at: string;
 }
 
 export function listReview(settings: Settings): Promise<{ count: number; items: ReviewItem[] }> {
   return request(settings, "/api/v1/review", { admin: true });
+}
+
+export interface Delivery {
+  delivery_id: number;
+  item: ReviewItem;
+}
+
+export function listNews(settings: Settings, ack = true): Promise<{ count: number; items: Delivery[] }> {
+  return request(settings, `/api/v1/news${ack ? "?ack=true" : ""}`);
 }
 
 export interface AuditEntry {
@@ -112,10 +125,19 @@ export interface AuditEntry {
   created_at: string;
 }
 
+export interface MediaAsset {
+  id: string;
+  kind: string;
+  filename: string | null;
+  mime_type: string | null;
+  size_bytes: number | null;
+  extraction_status: string;
+}
+
 export function reviewDetail(
   settings: Settings,
   id: string,
-): Promise<{ item: ReviewItem; audit: AuditEntry[] }> {
+): Promise<{ item: ReviewItem; audit: AuditEntry[]; media: MediaAsset[] }> {
   return request(settings, `/api/v1/review/${id}`, { admin: true });
 }
 

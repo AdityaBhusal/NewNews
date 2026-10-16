@@ -6,7 +6,6 @@ import {
   Button,
   Image,
   ScrollView,
-  StyleSheet,
   Text,
   TextInput,
   View,
@@ -14,6 +13,8 @@ import {
 import * as ImagePicker from "expo-image-picker";
 import * as Clipboard from "expo-clipboard";
 import { Settings, createItem, uploadMedia } from "../lib/api";
+import { randomEntry } from "../lib/catalog";
+import { T } from "../lib/theme";
 
 interface Picked {
   uri: string;
@@ -35,6 +36,17 @@ export default function IngestScreen({
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState("");
   const [lastId, setLastId] = useState<string | null>(null);
+
+  function dice() {
+    const entry = randomEntry();
+    setTitle(entry.title);
+    setBody(entry.body);
+    setSourceKey(`app-${Date.now()}`);
+    setResult(
+      `Dice rolled: stub predicts ${entry.certainty} certainty → ` +
+        (entry.expect === "auto" ? "auto-validates." : "goes to human review."),
+    );
+  }
 
   async function pick(fromCamera: boolean) {
     const permission = fromCamera
@@ -83,7 +95,7 @@ export default function IngestScreen({
           message += `\nMedia upload failed: ${error instanceof Error ? error.message : error}`;
         }
       }
-      message += "\nWatch it arrive on the /live website page.";
+      message += "\nOpen Track (prefilled) or watch /live.";
       setResult(message);
       setLastId(item.id);
       onAccepted(item.id);
@@ -96,40 +108,48 @@ export default function IngestScreen({
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.label}>Title (optional)</Text>
-      <TextInput style={styles.input} value={title} onChangeText={setTitle} />
-      <Text style={styles.label}>Body *</Text>
+    <ScrollView contentContainerStyle={T.screen}>
+      <Text style={T.h1}>New story</Text>
+      <View style={T.row}>
+        <Button title="🎲 Random news" onPress={dice} />
+      </View>
+      <Text style={T.label}>Title (optional)</Text>
+      <TextInput style={T.input} value={title} onChangeText={setTitle} />
+      <Text style={T.label}>Body *</Text>
       <TextInput
-        style={[styles.input, styles.body]}
+        style={[T.input, { minHeight: 120, textAlignVertical: "top" }]}
         value={body}
         onChangeText={setBody}
         multiline
         placeholder="Kathmandu, …"
       />
-      <Text style={styles.label}>Source key</Text>
-      <TextInput style={styles.input} value={sourceKey} onChangeText={setSourceKey} />
-      <View style={styles.row}>
+      <Text style={T.label}>Source key</Text>
+      <TextInput style={T.input} value={sourceKey} onChangeText={setSourceKey} />
+      <View style={T.row}>
         <Button title="Camera" onPress={() => void pick(true)} />
         <Button title="Gallery" onPress={() => void pick(false)} />
         {photo && <Button title="Remove" onPress={() => setPhoto(null)} />}
       </View>
       {photo && (
-        <Image source={{ uri: photo.uri }} style={styles.preview} resizeMode="contain" />
+        <Image source={{ uri: photo.uri }} style={{ height: 200, borderRadius: 12 }} resizeMode="cover" />
       )}
       {busy ? (
         <ActivityIndicator />
       ) : (
         <Button title="Submit story" onPress={() => void submit()} />
       )}
-      {result ? <Text style={styles.result}>{result}</Text> : null}
+      {result ? (
+        <View style={T.card}>
+          <Text style={T.body}>{result}</Text>
+        </View>
+      ) : null}
       {lastId && !busy ? (
-        <View style={styles.row}>
+        <View style={T.row}>
           <Button
             title="Copy item ID"
             onPress={() => {
               void Clipboard.setStringAsync(lastId).then(() =>
-                setResult((m) => m + "\nID copied — paste it anywhere, or open Track (prefilled)."),
+                setResult((m) => m + "\nID copied — Track is already prefilled."),
               );
             }}
           />
@@ -138,13 +158,3 @@ export default function IngestScreen({
     </ScrollView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: { padding: 16, gap: 4 },
-  label: { fontWeight: "600", marginTop: 8 },
-  input: { borderWidth: 1, borderColor: "#ccc", borderRadius: 6, padding: 8 },
-  body: { minHeight: 120, textAlignVertical: "top" },
-  row: { flexDirection: "row", justifyContent: "space-around", marginVertical: 8 },
-  preview: { height: 200, marginVertical: 8 },
-  result: { marginTop: 12, backgroundColor: "#f1f3f5", padding: 10, borderRadius: 6 },
-});
