@@ -1,0 +1,24 @@
+# Keep the free-tier service (and its in-container worker) warm.
+#
+# Render's free plan spins the web service down after ~15 min without traffic —
+# the worker sleeps with it, so a cold item would wait ~30-60 s for processing.
+# This pings the unauthenticated liveness probe every 10 min. No secrets needed.
+
+name: keep-warm
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Ping /healthz
+        run: |
+          code=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 60 \
+            https://newnews-t54x.onrender.com/healthz)
+          echo "healthz -> $code"
+          test "$code" = "200"

@@ -46,6 +46,12 @@ class NewsItem(Base, TimestampMixin):
     validation_status: Mapped[str | None] = mapped_column(String(32))
     validation_rationale: Mapped[str | None] = mapped_column(Text)
 
+    # Editorial badge: set only by the admin review-approve endpoint. Survives
+    # the rest of the pipeline (enrich/match/delivery) so clients can display
+    # "editorially reviewed" without joining audit_events.
+    editorially_reviewed: Mapped[bool] = mapped_column(default=False)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     # Enrichment
     topics: Mapped[list] = mapped_column(JSONB, default=list)
     locations: Mapped[list] = mapped_column(JSONB, default=list)

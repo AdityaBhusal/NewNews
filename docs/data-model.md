@@ -40,6 +40,8 @@ Unique constraint `uq_items_source_hash (source_key, content_hash)` — the idem
 | `credibility_confidence` | `FLOAT`, nullable | 0–1, provider's confidence in *its own* score |
 | `validation_status` | `VARCHAR(32)`, nullable | `likely_credible` / `uncertain` / `unlikely_credible` |
 | `validation_rationale` | `TEXT`, nullable | Newline-joined rationale strings |
+| `editorially_reviewed` | `BOOLEAN`, default `false` | Badge: set only by review-approve, survives to delivery |
+| `reviewed_at` | `TIMESTAMPTZ`, nullable | When the badge was stamped |
 | `topics` | `JSONB`, default `[]` | Enrichment |
 | `locations` | `JSONB`, default `[]` | Enrichment (normalized lowercase place names) |
 | `urgency` | `VARCHAR(16)`, default `normal` | `low` / `normal` / `high` |

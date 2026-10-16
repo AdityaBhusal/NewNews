@@ -5,10 +5,10 @@
 > endpoint, new setting, decisions reversed). If this file and the code disagree, the code
 > wins — then fix this file.
 
-**Status (2026-10-16): M1–M2 complete & verified; M4 substantially done — Aiven `newnews`
-service wired, schema migrated, web service + in-container worker live, remote E2E green
-(ingest→worker→Groq→review→approve→eligible on the public URL). Remaining: remote media/OCR
-upload test, audio clip for Whisper, then M3-slim + M5.** README rewritten 2026-10-16
+**Status (2026-10-17): M1–M2 complete & verified; M4 live — Aiven `newnews` wired,
+web service + in-container worker (`scripts/render_start.sh`), remote E2E green,
+keep-warm workflow added, AI `certainty_label` + `editorially_reviewed` badge landed.
+Remaining: remote media/OCR upload test, audio clip for Whisper, then M3-slim + M5.** README rewritten 2026-10-16
 (descriptive, layman→technical; plan/progress in `docs/roadmap.md`).
 Full plan: `docs/roadmap.md` · Detailed docs: `docs/` (requirements, architecture, data-model,
 deployment, decisions/ADR-0001..0007, phase0-findings).
@@ -90,6 +90,7 @@ app/
 ├── worker/main.py         # claim → handler → next stage; retry w/ exp backoff
 │                          #   (base JOB_RETRY_BASE_SECONDS), dead-letter → item failed;
 │                          #   seeds correlation contextvar from item; drain() for tests
+│                          #   (+ render_start.sh runs it beside the API on Render free tier)
 ├── models/                # item.py (NewsItem+MediaAsset), job.py, client.py (Client,
 │                          #   Subscription, Delivery), audit.py, base.py (Base+timestamps)
 └── seed.py                # python -m app.seed → demo client, prints key ONCE

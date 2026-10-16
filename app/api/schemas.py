@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
+
+from app.pipeline.validation import certainty_label
 
 
 class MediaIn(BaseModel):
@@ -63,6 +65,8 @@ class ItemOut(BaseModel):
     credibility_confidence: float | None
     validation_status: str | None
     validation_rationale: str | None
+    editorially_reviewed: bool = False
+    reviewed_at: datetime | None = None
     topics: list[str]
     locations: list[str]
     urgency: str
@@ -71,6 +75,12 @@ class ItemOut(BaseModel):
     updated_at: datetime
     eligible_at: datetime | None
     delivered_at: datetime | None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def certainty_label(self) -> str:
+        """Badge-ready AI certainty: unassessed | low | medium | high."""
+        return certainty_label(self.credibility_score, self.credibility_confidence)
 
 
 class DeliveryOut(BaseModel):

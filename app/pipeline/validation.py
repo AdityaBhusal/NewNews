@@ -20,6 +20,26 @@ from app.pipeline.states import ItemStatus, transition
 # Minimum provider confidence before an item bypasses the review queue.
 MIN_ROUTING_CONFIDENCE = 0.4
 
+# Confidence at or above this renders as "high" certainty on the API badge.
+HIGH_CERTAINTY_CONFIDENCE = 0.7
+
+
+def certainty_label(score: float | None, confidence: float | None) -> str:
+    """Plain-language AI certainty for API consumers (badges, UI).
+
+    Derived from the provider's self-reported *confidence* (how sure the model
+    is of its own assessment), not the score (how credible the content looks —
+    a confident "unlikely" is still high certainty). Thresholds mirror routing:
+    below MIN_ROUTING_CONFIDENCE the item could not bypass review on AI alone.
+    """
+    if score is None or confidence is None:
+        return "unassessed"
+    if confidence >= HIGH_CERTAINTY_CONFIDENCE:
+        return "high"
+    if confidence >= MIN_ROUTING_CONFIDENCE:
+        return "medium"
+    return "low"
+
 
 async def run(session: AsyncSession, item: NewsItem, provider: AIProvider) -> str | None:
     settings = get_settings()

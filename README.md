@@ -91,7 +91,10 @@ TEST_DATABASE_URL=postgresql+psycopg://newnews:newnews@localhost:5432/newnews_te
   reworded copies (3-gram shingles, Jaccard ≥ 0.85 → linked `duplicate`).
 - **AI as assessment**: one JSON-schema-constrained Groq call produces score, confidence,
   rationale, topics, locations, urgency and summary *together* (route at 0.75 / 0.45;
-  input capped at `AI_MAX_INPUT_CHARS=8000` for the free tier's TPM).
+  input capped at `AI_MAX_INPUT_CHARS=8000` for the free tier's TPM). Every item payload
+  carries a badge-ready `certainty_label` (`unassessed`/`low`/`medium`/`high`, from the
+  model's own confidence) plus the `editorially_reviewed` badge stamped by review-approve —
+  both ride REST, SSE, and review detail because they live on `ItemOut`.
 - **Media**: PDF text layer first; a scan — or a custom-font layer with code-punctuation
   density > 3 % (Preeti/Krutidev-style encodings) — falls back to rasterizing pages
   (pypdfium2) and OCR. Extracted text is stored on the asset and appended to the body once,

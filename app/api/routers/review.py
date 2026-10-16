@@ -9,6 +9,8 @@ All routes are admin-only (X-Admin-Key / Bearer admin key).
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -104,6 +106,8 @@ async def approve_item(
     item = await _get_needs_review(session, item_id)
     note = payload.note if payload else None
     transition(item, ItemStatus.VALIDATED)
+    item.editorially_reviewed = True
+    item.reviewed_at = datetime.now(UTC)
     await record_audit(
         session,
         item,
