@@ -145,6 +145,40 @@ async def test_oversize_upload_rejected(db, api, admin_headers, monkeypatch):
         get_settings.cache_clear()
 
 
+async def test_review_detail_lists_attached_media(db, api, admin_headers):
+    """Uploads are visible in review (previously ItemOut carried no media)."""
+    from app.worker.main import drain
+
+    auth = await _create_client(api, admin_headers)
+    response = await api.post(
+        "/api/v1/items",
+        json={
+            "body": "placeholder pending attached scan",
+            "source_key": "media-review",
+            "media": [
+                {
+                    "kind": "document",
+                    "uri": "https://example.com/scan.pdf",
+                    "filename": "scan.pdf",
+                }
+            ],
+        },
+        headers=auth,
+    )
+    assert response.status_code == 202, response.text
+    item_id = response.json()["id"]
+    await drain(db)
+
+    response = await api.get(f"/api/v1/review/{item_id}", headers=admin_headers)
+    assert response.status_code == 200
+    media = response.json()["media"]
+    assert len(media) == 1
+    assert media[0]["kind"] == "document"
+    assert media[0]["filename"] == "scan.pdf"
+    # Remote URL with no file bytes: extraction errors, item continues.
+    assert media[0]["extraction_status"] == "error"
+
+
 async def test_items_without_media_still_flow(db, api, admin_headers):
     """extract_media is a pass-through when nothing is attached (regression)."""
     from app.models import NewsItem

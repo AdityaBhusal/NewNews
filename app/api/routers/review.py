@@ -19,13 +19,14 @@ from app.api.deps import require_admin
 from app.api.schemas import (
     AuditEventOut,
     ItemOut,
+    MediaOut,
     ReviewDecision,
     ReviewDetail,
     ReviewQueue,
     ReviewRejection,
 )
 from app.core.db import get_session
-from app.models import AuditEvent, NewsItem
+from app.models import AuditEvent, MediaAsset, NewsItem
 from app.pipeline.audit import record_audit
 from app.pipeline.queue import enqueue_job
 from app.pipeline.states import ItemStatus, transition
@@ -89,9 +90,17 @@ async def review_item_detail(
             .order_by(AuditEvent.created_at, AuditEvent.id)
         )
     ).scalars()
+    assets = (
+        await session.execute(
+            select(MediaAsset)
+            .where(MediaAsset.item_id == item_id)
+            .order_by(MediaAsset.created_at)
+        )
+    ).scalars()
     return ReviewDetail(
         item=ItemOut.model_validate(item),
         audit=[AuditEventOut.model_validate(event) for event in events],
+        media=[MediaOut.model_validate(asset) for asset in assets],
     )
 
 

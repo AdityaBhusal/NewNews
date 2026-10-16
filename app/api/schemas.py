@@ -151,3 +151,7 @@ class AuditEventOut(BaseModel):
 class ReviewDetail(BaseModel):
     item: ItemOut
     audit: list[AuditEventOut] = Field(default_factory=list)
+    media: list[MediaOut] = Field(
+        default_factory=list,
+        description="Attached assets with extraction status.",
+    )
