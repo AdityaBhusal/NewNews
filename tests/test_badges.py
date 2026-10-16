@@ -123,3 +123,17 @@ async def test_reject_leaves_badge_unset(db, api, admin_headers):
         item = await session.get(NewsItem, item_id)
         assert item.editorially_reviewed is False
         assert item.reviewed_at is None
+
+
+@needs_db
+async def test_api_key_accepted_as_query_param(db, api, admin_headers):
+    """?api_key= exists for browser clients that cannot set headers (EventSource)."""
+    from tests.test_pipeline_integration import _create_client
+
+    api_key, _ = await _create_client(api, admin_headers)
+
+    response = await api.get(f"/api/v1/news?api_key={api_key}")
+    assert response.status_code == 200
+
+    response = await api.get("/api/v1/news?api_key=nn_bad_secret")
+    assert response.status_code == 401

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NewNews — Feed (REST)</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
+  .key { margin-bottom: 1rem; } input { width: 100%; padding: .5rem; }
+  .item { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
+  .badges span { display: inline-block; font-size: .8rem; border-radius: 999px; padding: .1rem .6rem; margin-right: .4rem; }
+  .cert-high { background: #dcf5e3; } .cert-medium { background: #fff3cd; }
+  .cert-low { background: #f8d7da; } .cert-unassessed { background: #e9ecef; }
+  .ed { background: #d0ebff; }
+</style>
+</head>
+<body>
+<h1>NewNews feed <small>(REST pull)</small></h1>
+<p><a href="/live">Switch to the live SSE page →</a></p>
+<div class="key">
+  <input id="key" type="password" placeholder="Client API key (nn_…)" />
+  <button onclick="load()">Load feed</button>
+  <label><input type="checkbox" id="ack" checked /> ack (mark delivered)</label>
+</div>
+<div id="feed"></div>
+<script>
+async function load() {
+  const key = document.getElementById('key').value;
+  const ack = document.getElementById('ack').checked ? '?ack=true' : '';
+  const r = await fetch('/api/v1/news' + ack, {headers: {Authorization: 'Bearer ' + key}});
+  const data = await r.json();
+  document.getElementById('feed').innerHTML = (data.items || []).map(e => {
+    const i = e.item;
+    return `<div class="item"><div class="badges">
+      <span class="cert-${i.certainty_label}">${i.certainty_label} · ${i.credibility_score ?? '—'}</span>
+      ${i.editorially_reviewed ? '<span class="ed">✓ editorially reviewed</span>' : ''}
+      <span>${i.status}</span></div>
+      <h3>${i.title || '(untitled)'}</h3>
+      <p>${i.summary || ''}</p>
+      <p><small>${(i.topics || []).join(', ')} · ${i.language || ''} · ${i.created_at}</small></p>
+    </div>`;
+  }).join('') || '<p>No deliveries yet.</p>';
+}
+</script>
+</body>
+</html>

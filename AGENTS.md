@@ -55,7 +55,9 @@ app/
 │   ├── schemas.py         # Pydantic req/resp models (ItemOut uses from_attributes)
 │   ├── deps.py            # auth: Bearer or X-API-Key → Client; X-Admin-Key → admin
 │   └── routers/           # health(/healthz,/readyz), ingest, media(POST items/{id}/media),
-│                          #   news, clients, events(SSE), review(admin: queue/approve/reject)
+│                          #   news, clients, events(SSE), review(admin: queue/approve/reject),
+│                          #   pages(/feed REST demo, /live SSE demo — static HTML, no auth on pages)
+│   ├── static/            # feed.html, live.html served by the pages router
 ├── core/                  # config.py (Settings, lru_cache get_settings), db.py (engine,
 │                          #   SessionLocal, get_session dep, session_scope), logging.py
 │                          #   (JSON logs), context.py (correlation-id contextvar),
@@ -167,9 +169,10 @@ image. Green checks = M-status visible at a glance. Keep it green (invariant 9).
 
 Endpoints: `POST/GET /api/v1/items`, `POST /api/v1/items/{id}/media` (multipart, must be
 `received`), `GET /api/v1/news(?ack=true)`, `GET /api/v1/items/{id}`,
-`GET /api/v1/events` (SSE), `POST /api/v1/clients` (admin), `GET /api/v1/clients/me`,
+`GET /api/v1/events` (SSE; `?api_key=` query auth for browsers),
+`POST /api/v1/clients` (admin), `GET /api/v1/clients/me`,
 `GET /api/v1/review` + `GET/POST /api/v1/review/{id}(|approve|reject)` (admin),
-`/healthz`, `/readyz`, `/docs`.
+`/feed` + `/live` (open demo pages), `/healthz`, `/readyz`, `/docs`.
 
 ## 7. Verified facts (2026-10-15 run; re-verify if env changes)
 

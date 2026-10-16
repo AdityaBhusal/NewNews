@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NewNews — Live (SSE)</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
+  input { width: 100%; padding: .5rem; margin-bottom: .5rem; }
+  #log div { border-left: 3px solid #1a7f37; padding: .5rem 1rem; margin: .75rem 0; background: #f8f9fa; }
+  .badges span { display: inline-block; font-size: .8rem; border-radius: 999px; padding: .1rem .6rem; margin-right: .4rem; }
+  .cert-high { background: #dcf5e3; } .cert-medium { background: #fff3cd; }
+  .cert-low { background: #f8d7da; } .cert-unassessed { background: #e9ecef; }
+  .ed { background: #d0ebff; }
+  #status { color: #666; }
+</style>
+</head>
+<body>
+<h1>NewNews live <small>(SSE push)</small></h1>
+<p><a href="/feed">Switch to the REST feed page →</a></p>
+<input id="key" type="password" placeholder="Client API key (nn_…)" />
+<button onclick="connect()">Connect</button>
+<p id="status">disconnected</p>
+<div id="log"></div>
+<script>
+let src = null;
+function connect() {
+  if (src) src.close();
+  const key = document.getElementById('key').value;
+  // EventSource cannot set headers: the API also accepts ?api_key= for browser clients.
+  src = new EventSource('/api/v1/events?api_key=' + encodeURIComponent(key));
+  const log = document.getElementById('log');
+  document.getElementById('status').textContent = 'connected — waiting for deliveries…';
+  src.addEventListener('news', ev => {
+    const d = JSON.parse(ev.data), i = d.item;
+    const div = document.createElement('div');
+    div.innerHTML = `<div class="badges">
+      <span class="cert-${i.certainty_label}">${i.certainty_label} · ${i.credibility_score ?? '—'}</span>
+      ${i.editorially_reviewed ? '<span class="ed">✓ editorially reviewed</span>' : ''}</div>
+      <strong>${i.title || '(untitled)'}</strong><br/>${i.summary || ''}<br/>
+      <small>delivery #${d.delivery_id} · ${(i.topics || []).join(', ')}</small>`;
+    log.prepend(div);
+  });
+  src.onerror = () => { document.getElementById('status').textContent = 'connection error — check the key'; };
+}
+</script>
+</body>
+</html>

@@ -74,10 +74,20 @@ TEST_DATABASE_URL=postgresql+psycopg://newnews:newnews@localhost:5432/newnews_te
 | `POST /api/v1/items/{id}/media` | client key | attach a file while the item is `received`; extraction runs before assessment |
 | `GET /api/v1/news(?ack=true)` | client key | pull feed, acknowledge deliveries |
 | `GET /api/v1/items/{id}` | client key | one item with full detail |
-| `GET /api/v1/events` | client key | SSE stream — `Last-Event-ID` resume, 15 s heartbeats |
+| `GET /api/v1/events` | client key (header or `?api_key=` for browsers) | SSE stream — `Last-Event-ID` resume, 15 s heartbeats |
 | `POST/GET /api/v1/clients…` | admin key | mint / inspect clients and subscriptions |
 | `GET /api/v1/review…` + `approve`/`reject` | admin key | editorial queue for uncertain items |
 | `/healthz` · `/readyz` · `/docs` | none | liveness · readiness (redacted DB errors) · OpenAPI |
+
+## Delivery website (demo UI, no build step)
+
+Two static pages served by the API itself, using the endpoints above with the visitor's
+own keys — the same origin, so no CORS configuration:
+
+- **`/feed`** — REST pull: paste a client key, load `GET /api/v1/news` (optional ack),
+  items render with their `certainty_label` and `editorially_reviewed` badges.
+- **`/live`** — SSE push: connects `EventSource` to `/api/v1/events` (query-key auth,
+  since browsers can't set headers) and prepends each delivery as it arrives.
 
 ## Under the hood
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,8 +25,12 @@ def _extract_key(authorization: str | None, x_api_key: str | None) -> str | None
 async def get_api_key(
     authorization: str | None = Header(default=None),
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+    api_key_query: str | None = Query(default=None, alias="api_key"),
 ) -> str:
-    key = _extract_key(authorization, x_api_key)
+    # Precedence: Bearer → X-API-Key → ?api_key=. The query form exists only for
+    # browser clients that cannot set headers (EventSource on /events); request
+    # logs record scope["path"] without the query string, so keys never land in logs.
+    key = _extract_key(authorization, x_api_key) or (api_key_query or "").strip() or None
     if not key:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

@@ -76,3 +76,12 @@ async def test_news_requires_api_key(api):
 async def test_clients_requires_admin_key(api):
     response = await api.post("/api/v1/clients", json={"name": "nope"})
     assert response.status_code == 403
+
+
+async def test_delivery_pages_serve_html(api):
+    for path in ("/feed", "/live"):
+        response = await api.get(path)
+        assert response.status_code == 200, path
+        assert "text/html" in response.headers["content-type"]
+    assert "api/v1/news" in (await api.get("/feed")).text
+    assert "api/v1/events" in (await api.get("/live")).text
