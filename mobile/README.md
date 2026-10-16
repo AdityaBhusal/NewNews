@@ -31,6 +31,9 @@ npx expo start          # scan the QR with Expo Go (same Wi-Fi for LAN use)
    trail) → Approve with a note (or Reject with a reason).
 4. **Website** — the approved item arrives on `/live` with its `editorially_reviewed`
    badge; `/feed` shows it on reload.
+5. **Track tab** — paste any item id: status, badges, and the audit journey. Tap
+   **Go live** to hold the SSE stream open — any delivery refetches the item, so
+   approvals and stage transitions appear without refreshing.
 
 Photo OCR path: photograph any Nepali/English printed text — `extract_media` OCRs it
 before the AI assessment sees it.

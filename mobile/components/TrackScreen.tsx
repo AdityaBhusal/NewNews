@@ -6,8 +6,7 @@
  * without pulling to refresh.
  */
 
-import { useEffect, useRef, useState } from "react";
-import { Button, FlatList, StyleSheet, Text, TextInput, View } from "react-native";
+import { useEffect, useRef, useState } from "react";import { Button, FlatList, StyleSheet, Text, TextInput, View } from "react-native";
 import {
   Settings,
   reviewDetail,
@@ -16,14 +15,31 @@ import {
   type ReviewItem,
 } from "../lib/api";
 
-export default function TrackScreen({ settings }: { settings: Settings }) {
-  const [itemId, setItemId] = useState("");
+export default function TrackScreen({
+  settings,
+  suggestedId,
+}: {
+  settings: Settings;
+  suggestedId: string;
+}) {
+  const [itemId, setItemId] = useState(suggestedId);
   const [item, setItem] = useState<ReviewItem | null>(null);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [live, setLive] = useState(false);
   const [streamState, setStreamState] = useState("off");
   const [message, setMessage] = useState("");
   const stopRef = useRef<(() => void) | null>(null);
+
+  // Latest ingest pre-fills the field (and auto-tracks once per new id).
+  const seenRef = useRef("");
+  useEffect(() => {
+    if (suggestedId && suggestedId !== seenRef.current) {
+      seenRef.current = suggestedId;
+      setItemId(suggestedId);
+      void track(suggestedId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [suggestedId]);
 
   async function track(id: string) {
     const clean = id.trim();

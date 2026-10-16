@@ -14,6 +14,7 @@ type Tab = "ingest" | "review" | "track" | "settings";
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("ingest");
+  const [lastItemId, setLastItemId] = useState("");
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [draft, setDraft] = useState<Settings>(DEFAULT_SETTINGS);
 
@@ -61,9 +62,9 @@ export default function App() {
         ))}
       </View>
       <View style={styles.body}>
-        {tab === "ingest" && <IngestScreen settings={settings} />}
+        {tab === "ingest" && <IngestScreen settings={settings} onAccepted={setLastItemId} />}
         {tab === "review" && <ReviewScreen settings={settings} />}
-        {tab === "track" && <TrackScreen settings={settings} />}
+        {tab === "track" && <TrackScreen settings={settings} suggestedId={lastItemId} />}
         {tab === "settings" && (
           <View style={styles.form}>
             <Text style={styles.label}>API base URL</Text>

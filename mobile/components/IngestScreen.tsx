@@ -12,6 +12,7 @@ import {
   View,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
+import * as Clipboard from "expo-clipboard";
 import { Settings, createItem, uploadMedia } from "../lib/api";
 
 interface Picked {
@@ -20,13 +21,20 @@ interface Picked {
   mimeType: string;
 }
 
-export default function IngestScreen({ settings }: { settings: Settings }) {
+export default function IngestScreen({
+  settings,
+  onAccepted,
+}: {
+  settings: Settings;
+  onAccepted: (id: string) => void;
+}) {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [sourceKey, setSourceKey] = useState(`app-${Date.now()}`);
   const [photo, setPhoto] = useState<Picked | null>(null);
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<string>("");
+  const [result, setResult] = useState("");
+  const [lastId, setLastId] = useState<string | null>(null);
 
   async function pick(fromCamera: boolean) {
     const permission = fromCamera
@@ -77,6 +85,8 @@ export default function IngestScreen({ settings }: { settings: Settings }) {
       }
       message += "\nWatch it arrive on the /live website page.";
       setResult(message);
+      setLastId(item.id);
+      onAccepted(item.id);
       setSourceKey(`app-${Date.now()}`);
     } catch (error) {
       setResult(`Failed: ${error instanceof Error ? error.message : error}`);
@@ -113,6 +123,18 @@ export default function IngestScreen({ settings }: { settings: Settings }) {
         <Button title="Submit story" onPress={() => void submit()} />
       )}
       {result ? <Text style={styles.result}>{result}</Text> : null}
+      {lastId && !busy ? (
+        <View style={styles.row}>
+          <Button
+            title="Copy item ID"
+            onPress={() => {
+              void Clipboard.setStringAsync(lastId).then(() =>
+                setResult((m) => m + "\nID copied — paste it anywhere, or open Track (prefilled)."),
+              );
+            }}
+          />
+        </View>
+      ) : null}
     </ScrollView>
   );
 }
