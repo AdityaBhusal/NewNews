@@ -155,3 +155,18 @@ class ReviewDetail(BaseModel):
         default_factory=list,
         description="Attached assets with extraction status.",
     )
+
+
+class TrackEntry(BaseModel):
+    """One row of the pipeline board: the item + its audit event stream."""
+
+    item: ItemOut
+    events: list[str] = Field(
+        default_factory=list,
+        description="Audit event_types in order — drives the stage rail.",
+    )
+
+
+class TrackBoard(BaseModel):
+    count: int
+    items: list[TrackEntry]

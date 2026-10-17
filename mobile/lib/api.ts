@@ -141,6 +141,18 @@ export function reviewDetail(
   return request(settings, `/api/v1/review/${id}`, { admin: true });
 }
 
+export interface TrackEntry {
+  item: ReviewItem;
+  events: string[];
+}
+
+export function listTrackBoard(
+  settings: Settings,
+  limit = 200,
+): Promise<{ count: number; items: TrackEntry[] }> {
+  return request(settings, `/api/v1/track?limit=${limit}`, { admin: true });
+}
+
 export function approveItem(settings: Settings, id: string, note?: string): Promise<ReviewItem> {
   return request(settings, `/api/v1/review/${id}/approve`, {
     method: "POST",

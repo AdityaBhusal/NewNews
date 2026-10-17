@@ -1,70 +1,166 @@
-/** Track screen: any item's status, badges, latency, editor notes and journey.
+/** Track screen: the whole pipeline as a live board of rows.
  *
- * Always live: tracking opens the SSE delivery stream and every `news` frame
- * refetches the item — approvals and stage transitions appear on their own.
- * Same data as the website's /track page (admin review-detail endpoint).
+ * Every item in the system is one row carrying a 6-stage rail
+ * (Ingest→Extract→Validate→Review→Enrich→Deliver) drawn as `.---.---.---`
+ * so you see at a glance where each story sits. Rows are collapsible: tap to
+ * expand badges, latencies, editor note, media and the full audit journey.
+ *
+ * Always live: the SSE delivery stream is open the whole time and every
+ * `news` frame refetches the board, so approvals and stage transitions walk
+ * their dots forward on their own.
  */
 
-import { useEffect, useRef, useState } from "react";
-import { Button, FlatList, StyleSheet, Text, TextInput, View } from "react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  ActivityIndicator,
+  FlatList,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import {
   Settings,
-  reviewDetail,
+  listTrackBoard,
   subscribeDeliveries,
-  type AuditEntry,
-  type MediaAsset,
-  type ReviewItem,
+  type TrackEntry,
 } from "../lib/api";
 import { C, T, certaintyColors, latencyBetween } from "../lib/theme";
 
 const TERMINAL = new Set(["delivered", "duplicate", "rejected", "failed"]);
 
-interface Step {
-  name: string;
-  state: "done" | "current" | "todo" | "skip";
-}
+/** The six board columns. `key` matches an audit event that marks completion. */
+const STAGES: { name: string; short: string; done: (e: Set<string>) => boolean }[] = [
+  { name: "Ingest", short: "ING", done: (e) => e.has("received") },
+  { name: "Extract", short: "EXT", done: (e) => e.has("extracted") || e.has("media_extracted") },
+  { name: "Validate", short: "VAL", done: (e) => e.has("validated") || e.has("needs_review") },
+  {
+    name: "Review",
+    short: "REV",
+    done: (e) => e.has("review_approved") || e.has("review_rejected"),
+  },
+  { name: "Enrich", short: "ENR", done: (e) => e.has("enriched") },
+  { name: "Deliver", short: "DEL", done: (e) => e.has("delivered") },
+];
 
-function stepper(events: string[], status: string): Step[] {
+type StageState = "done" | "current" | "todo" | "skip";
+
+/** Map an item's audit stream + status onto per-stage states for the rail. */
+function stageStates(events: string[], status: string): StageState[] {
   const has = new Set(events);
   const reviewNeeded = has.has("needs_review");
-  const steps: Step[] = [
-    { name: "Ingest", state: has.has("received") ? "done" : "todo" },
-    {
-      name: "Extract",
-      state: has.has("extracted") || has.has("media_extracted") ? "done" : "todo",
-    },
-    {
-      name: "Validate",
-      state: has.has("validated") || has.has("needs_review") ? "done" : "todo",
-    },
-    {
-      name: "Review",
-      state: !reviewNeeded
-        ? "skip"
-        : has.has("review_approved") || has.has("review_rejected")
-          ? "done"
-          : "todo",
-    },
-    { name: "Enrich", state: has.has("enriched") ? "done" : "todo" },
-    {
-      name: "Deliver",
-      state: has.has("delivered") ? "done" : has.has("eligible") ? "current" : "todo",
-    },
-  ];
-  if (!TERMINAL.has(status)) {
-    const firstOpen = steps.findIndex((s) => s.state === "todo");
-    if (firstOpen >= 0 && steps[firstOpen].state === "todo") {
-      steps[firstOpen] = { ...steps[firstOpen], state: "current" };
-    }
+  const states: StageState[] = STAGES.map((stage) => {
+    if (stage.name === "Review" && !reviewNeeded) return "skip";
+    return stage.done(has) ? "done" : "todo";
+  });
+  // Mark "eligible" as the pre-delivery holding pen (Deliver is current, not done).
+  if (has.has("eligible") && !has.has("delivered")) {
+    states[STAGES.length - 1] = "current";
   }
-  return steps;
+  // First non-done, non-skip stage is where the item actually is right now.
+  if (!TERMINAL.has(status)) {
+    const idx = states.findIndex((s) => s === "todo");
+    if (idx >= 0) states[idx] = "current";
+  }
+  return states;
 }
 
-function StepDot({ state }: { state: Step["state"] }) {
-  const glyph = state === "done" ? "●" : state === "current" ? "◉" : state === "skip" ? "–" : "○";
-  const color =
-    state === "done" ? C.good : state === "current" ? C.accent : C.muted;
-  return <Text style={{ color, fontSize: 16 }}>{glyph}</Text>;
+const DOT: Record<StageState, { glyph: string; color: string }> = {
+  done: { glyph: "●", color: C.good },
+  current: { glyph: "◉", color: C.accent },
+  todo: { glyph: "○", color: C.line },
+  skip: { glyph: "–", color: C.muted },
+};
+
+/** The `.---.---.---` rail: dots joined by dashes, one per stage. */
+function StageRail({ states }: { states: StageState[] }) {
+  return (
+    <View style={styles.rail}>
+      {states.map((state, i) => (
+        <View key={STAGES[i].name} style={styles.railCell}>
+          <Text style={[styles.dot, { color: DOT[state].color }]}>{DOT[state].glyph}</Text>
+          <Text
+            style={[
+              styles.railLabel,
+              state === "done" && { color: C.good },
+              state === "current" && { color: C.accent, fontWeight: "800" },
+            ]}
+          >
+            {STAGES[i].short}
+          </Text>
+          {i < states.length - 1 && <Text style={styles.dash}>–</Text>}
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function Row({
+  entry,
+  expanded,
+  onToggle,
+}: {
+  entry: TrackEntry;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const { item, events } = entry;
+  const states = stageStates(events, item.status);
+  const cert = certaintyColors(item.certainty_label);
+  const approval = events.includes("review_approved");
+  const rejection = events.includes("review_rejected");
+
+  return (
+    <Pressable onPress={onToggle} style={[T.card, expanded && styles.expanded]}>
+      <View style={T.row}>
+        <Text style={[T.badge, { backgroundColor: "#e9ecef", color: C.ink }]}>
+          {item.status}
+        </Text>
+        <Text style={[T.badge, { backgroundColor: cert.bg, color: cert.fg }]}>
+          {item.certainty_label} · {item.credibility_score ?? "—"}
+        </Text>
+        {item.editorially_reviewed ? (
+          <Text style={[T.badge, { backgroundColor: C.infoSoft, color: C.info }]}>
+            ✓ reviewed
+          </Text>
+        ) : null}
+        <Text style={T.small}>{expanded ? "▲" : "▼"}</Text>
+      </View>
+
+      <StageRail states={states} />
+
+      <Text style={T.title} numberOfLines={expanded ? undefined : 1}>
+        {item.title || item.body.slice(0, 80)}
+      </Text>
+      <Text style={T.small}>
+        {(item.topics || []).join(", ") || "no topics"} · {item.urgency}
+      </Text>
+
+      {expanded && (
+        <View style={styles.detail}>
+          <Text style={T.body}>{item.body}</Text>
+          <Text style={T.small}>
+            AI confidence {item.credibility_confidence ?? "—"} · ingest→eligible{" "}
+            {latencyBetween(item.created_at, item.eligible_at)} · eligible→delivered{" "}
+            {latencyBetween(item.eligible_at, item.delivered_at)}
+          </Text>
+          {item.validation_rationale ? (
+            <Text style={T.note}>AI: {item.validation_rationale}</Text>
+          ) : null}
+          {approval ? (
+            <Text style={T.note}>✓ Editorially approved{item.reviewed_at ? ` · ${item.reviewed_at}` : ""}</Text>
+          ) : null}
+          {rejection ? <Text style={T.note}>✗ Rejected by an editor</Text> : null}
+          <Text style={T.label}>Audit journey</Text>
+          {events.map((event, i) => (
+            <Text key={`${event}-${i}`} style={T.mono}>
+              {event}
+            </Text>
+          ))}
+        </View>
+      )}
+    </Pressable>
+  );
 }
 
 export default function TrackScreen({
@@ -74,55 +170,79 @@ export default function TrackScreen({
   settings: Settings;
   suggestedId: string;
 }) {
-  const [itemId, setItemId] = useState(suggestedId);
-  const [item, setItem] = useState<ReviewItem | null>(null);
-  const [audit, setAudit] = useState<AuditEntry[]>([]);
-  const [media, setMedia] = useState<MediaAsset[]>([]);
-  const [stream, setStream] = useState("off");
+  const [entries, setEntries] = useState<TrackEntry[]>([]);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [stream, setStream] = useState("connecting…");
   const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(false);
   const stopRef = useRef<(() => void) | null>(null);
   const seenRef = useRef("");
 
-  async function track(id: string) {
-    const clean = id.trim();
-    if (!clean) return;
+  const load = useCallback(async () => {
     if (!settings.adminKey) {
       setMessage("Set the admin key in Settings first.");
       return;
     }
+    setLoading(true);
     try {
-      const detail = await reviewDetail(settings, clean);
-      setItem(detail.item);
-      setAudit(detail.audit);
-      setMedia(detail.media ?? []);
-      setMessage("");
+      const board = await listTrackBoard(settings);
+      setEntries(board.items);
+      setMessage(board.count === 0 ? "Pipeline is empty — ingest something." : "");
     } catch (error) {
       setMessage(`Failed: ${error instanceof Error ? error.message : error}`);
+    } finally {
+      setLoading(false);
     }
+  }, [settings]);
+
+  // Load once on mount / settings change. The `await` is the boundary: every
+  // setState below runs in a promise callback after the effect body has returned,
+  // never synchronously inside the effect.
+  useEffect(() => {
+    (async () => {
+      if (!settings.adminKey) {
+        setMessage("Set the admin key in Settings first.");
+        return;
+      }
+      setLoading(true);
+      try {
+        const board = await listTrackBoard(settings);
+        setEntries(board.items);
+        setMessage(board.count === 0 ? "Pipeline is empty — ingest something." : "");
+      } catch (error) {
+        setMessage(`Failed: ${error instanceof Error ? error.message : error}`);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [settings]);
+
+  // A freshly ingested id auto-expands its row. Adjusting state during render
+  // (the React-documented prop-change pattern) — not in an effect body.
+  const [prevSuggested, setPrevSuggested] = useState(suggestedId);
+  if (suggestedId !== prevSuggested) {
+    setPrevSuggested(suggestedId);
+    if (suggestedId) setExpandedId(suggestedId);
   }
 
-  // Latest ingest pre-fills and auto-tracks once per new id.
+  // Fetch board data when a fresh ingest arrives (expansion is set during
+  // render above; this effect only triggers the network read).
   useEffect(() => {
     if (suggestedId && suggestedId !== seenRef.current) {
       seenRef.current = suggestedId;
-      setItemId(suggestedId);
-      void track(suggestedId);
+      void load();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [suggestedId]);
 
-  // Always live while a non-terminal item is tracked: any delivery refetches
-  // it. Labels come from stream callbacks + render derivation — never setState
-  // in the effect body.
-  const terminal = !!item && TERMINAL.has(item.status);
+  // Always live: every delivery refetches the whole board so dots walk forward.
   useEffect(() => {
-    if (!item || terminal || !settings.clientKey) return;
-    const id = item.id;
+    if (!settings.clientKey) return;
     const stop = subscribeDeliveries(
       settings,
       () => {
         setStream("update received, refetching…");
-        void track(id).then(() => setStream("live"));
+        void load().then(() => setStream("live"));
       },
       (errorMessage) => setStream(`stream error: ${errorMessage}`),
       () => setStream("live"),
@@ -133,99 +253,35 @@ export default function TrackScreen({
       stopRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [item?.id, settings.clientKey]);
+  }, [settings.clientKey]);
 
-  const events = audit.map((e) => e.event_type);
-  const steps = item ? stepper(events, item.status) : [];
-  const approval = audit.find((e) => e.event_type === "review_approved");
-  const approvalNote =
-    approval && typeof approval.detail?.note === "string" ? approval.detail.note : null;
-  const cert = item ? certaintyColors(item.certainty_label) : null;
+  const active = entries.filter((e) => !TERMINAL.has(e.item.status)).length;
 
   return (
     <View style={T.screen}>
-      <Text style={T.h1}>Track</Text>
       <View style={T.row}>
-        <TextInput
-          style={[T.input, { flex: 1 }]}
-          value={itemId}
-          onChangeText={setItemId}
-          autoCapitalize="none"
-          placeholder="Item id (from ingest response)"
-        />
-        <Button title="Track" onPress={() => void track(itemId)} />
+        <Text style={T.h1}>Pipeline</Text>
+        {loading ? <ActivityIndicator /> : null}
       </View>
-      <Text style={styles.stream}>
-        ● SSE:{" "}
-        {!item
-          ? "off"
-          : !settings.clientKey
-            ? "off (no client key)"
-            : terminal
-              ? "terminal — no further stages"
-              : stream}
+      <Text style={T.small}>
+        {entries.length} items · {active} in flight ·{" "}
+        <Text style={styles.stream}>
+          ● SSE: {settings.clientKey ? stream : "off (no client key)"}
+        </Text>
       </Text>
       {message ? <Text style={T.small}>{message}</Text> : null}
-      {item && cert && (
-        <View style={T.card}>
-          <View style={T.row}>
-            <Text style={[T.badge, { backgroundColor: "#e9ecef", color: C.ink }]}>
-              {item.status}
-            </Text>
-            <Text style={[T.badge, { backgroundColor: cert.bg, color: cert.fg }]}>
-              {item.certainty_label} · {item.credibility_score ?? "—"}
-            </Text>
-            {item.editorially_reviewed ? (
-              <Text style={[T.badge, { backgroundColor: C.infoSoft, color: C.info }]}>
-                ✓ reviewed
-              </Text>
-            ) : null}
-          </View>
-          <Text style={T.small}>
-            AI confidence {item.credibility_confidence ?? "—"} · ingest→eligible{" "}
-            {latencyBetween(item.created_at, item.eligible_at)} · eligible→delivered{" "}
-            {latencyBetween(item.eligible_at, item.delivered_at)}
-          </Text>
-          {item.editorially_reviewed ? (
-            <Text style={T.note}>
-              ✓ Editorially approved{item.reviewed_at ? ` · ${item.reviewed_at}` : ""}
-              {approvalNote ? `\n“${approvalNote}”` : ""}
-            </Text>
-          ) : null}
-        </View>
-      )}
-      {steps.length > 0 && (
-        <View style={T.card}>
-          <Text style={T.label}>Pipeline position</Text>
-          {steps.map((s) => (
-            <View key={s.name} style={T.row}>
-              <StepDot state={s.state} />
-              <Text style={s.state === "skip" ? T.small : T.body}>
-                {s.name}
-                {s.state === "skip" ? " (not needed)" : ""}
-              </Text>
-            </View>
-          ))}
-        </View>
-      )}
-      {media.length > 0 && (
-        <View style={T.card}>
-          <Text style={T.label}>Attached media</Text>
-          {media.map((m) => (
-            <Text key={m.id} style={T.small}>
-              {m.kind} · {m.filename ?? "(no name)"} · {m.extraction_status}
-              {m.size_bytes ? ` · ${Math.round(m.size_bytes / 1024)} KB` : ""}
-            </Text>
-          ))}
-        </View>
-      )}
       <FlatList
-        data={audit}
-        keyExtractor={(_, i) => String(i)}
+        data={entries}
+        keyExtractor={(entry) => entry.item.id}
+        contentContainerStyle={{ gap: 10, paddingBottom: 24 }}
         renderItem={({ item: entry }) => (
-          <Text style={T.mono}>
-            {entry.event_type} · {entry.stage ?? "?"} · {entry.created_at}
-          </Text>
+          <Row
+            entry={entry}
+            expanded={expandedId === entry.item.id}
+            onToggle={() =>
+              setExpandedId((cur) => (cur === entry.item.id ? null : entry.item.id))
+            }
+          />
         )}
       />
     </View>
@@ -234,4 +290,11 @@ export default function TrackScreen({
 
 const styles = StyleSheet.create({
   stream: { color: C.good, fontWeight: "700", fontSize: 12 },
+  expanded: { borderColor: C.accent },
+  rail: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 2 },
+  railCell: { flexDirection: "row", alignItems: "center" },
+  dot: { fontSize: 14 },
+  dash: { color: C.line, fontSize: 12, marginHorizontal: 1 },
+  railLabel: { fontSize: 9, color: C.muted, fontWeight: "600", marginRight: 4 },
+  detail: { gap: 6, borderTopWidth: 1, borderColor: C.line, paddingTop: 8, marginTop: 4 },
 });
