@@ -1,12 +1,20 @@
-"""Bulk demo seed: 4 category clients + N pipeline-processed items.
+"""Bulk demo seed: 4 category clients + N demo items — none ever enter review.
 
 `DATABASE_URL=... AI_PROVIDER=stub python -m app.seed_demo --count 200`
 
+Two pools only (decision 2026-10-17 — the review queue is for real editorial
+work, not demo data):
+- **processed** (default 60%): polished wire copy (dated, sourced, long) → the
+  stub auto-validates it → `eligible`/`delivered`, deliveries populate the four
+  category desks.
+- **raw** (default `--raw-share` 40%): rough intake snippets left at `received`
+  — ingested but never enqueued, like an unprocessed inbox. Process one via the
+  pipeline manually if you like; it will route to review because it is thin.
+
 Clients are idempotent by name (keys print only on creation); items use stable
 `seeddemo-{i}` source keys and are skipped when present, so re-runs only fill
-gaps. The pipeline runs locally via `drain()` with the deterministic stub, so a
-bulk seed is free and reproducible (`--seed`): high-wire copy auto-validates,
-plain bulletins land in the review queue, spam stays low-confidence.
+gaps. Pool assignment is index-deterministic (every 5th pattern), so re-runs
+never flip an existing item's pool.
 
 Category → subscription mapping (agreed 2026-10-17):
 - newspaper-desk: everything (empty axes, min_urgency low)
@@ -84,101 +92,94 @@ REPORTERS = [
     "Y. Pun", "R. Yadav", "S. Maharjan", "A. KC", "D. Bista",
 ]
 
+# (headline beat, topic word bucket, secondary topic) — topic words drive the
+# four desks: disaster/politics hit radio-TV's high-urgency gate via BREAKING,
+# economy hits market-desk, international/politics hit foreign-press.
+BEATS = [
+    ("cabinet approved flood relief", "disaster", "politics"),
+    ("monsoon landslide blocked the highway", "disaster", None),
+    ("NEPSE index climbed on a banking rally", "economy", None),
+    ("parliament passed the appropriation bill", "politics", None),
+    ("police arrested a smuggling ring", "crime", "politics"),
+    ("dengue cases rose sharply", "health", None),
+]
 
-def wire_body(place: str, beat: str, detail: str, day: int, tag: str) -> str:
-    official = random.choice(OFFICIALS)
-    closing = random.choice(CLOSINGS).format(
+# Raw-pool snippets: thin on purpose (they never run through the pipeline, so
+# their review-worthiness is irrelevant — they are intake backlog).
+RAW_SNIPPETS = [
+    "Rain in {place} on day {day}.",
+    "The {place} meeting ended well.",
+    "Power cut in {place} since {day} October.",
+    "Festival lights are up in {place}.",
+    "Traffic jam near {place} checkpoint {n}.",
+    "Water supply off in {place} ward {n}.",
+    "Miracle cure! Code {n}, click now!!",
+    "VIRAL prize! Code {n}, click!!",
+]
+
+
+def is_raw(index: int, raw_share: float) -> bool:
+    """Index-deterministic pool assignment: stable across re-runs.
+
+    With the default 0.4 share, indexes where ``i % 5 < 2`` are raw.
+    """
+    raw_slots = round(raw_share * 5)
+    return index % 5 < raw_slots
+
+
+def wire_body(rng: random.Random, place: str, beat: str, detail: str, day: int, tag: str) -> str:
+    official = rng.choice(OFFICIALS)
+    closing = rng.choice(CLOSINGS).format(
         official=official, official_cap=official.capitalize()
     )
-    reporter = random.choice(REPORTERS)
-    bureau = random.choice(PLACES)
-    serial = f"{tag}-{random.randint(1000, 9999)}"
+    reporter = rng.choice(REPORTERS)
+    bureau = rng.choice(PLACES)
+    serial = f"{tag}-{rng.randint(1000, 9999)}"
     return (
         f"{place}, {day} October 2026 — {beat} {detail} {closing} "
         f"(Dispatch {serial} filed by {reporter} via the {bureau} bureau.)"
     )
 
 
-def glimpses(rng: random.Random, tag: str) -> tuple[str, str]:
-    """(title, body) across the four beats + score tiers."""
+def processed_story(rng: random.Random, tag: str) -> tuple[str, str]:
+    """Wire copy that auto-validates under the stub (score ≥ 0.75, conf ≥ 0.4)."""
     place = rng.choice(PLACES)
     day = rng.randint(1, 17)
-    roll = rng.random()
-    if roll < 0.30:  # high-wire: auto-validates, certainty high
-        beat = rng.choice([
-            ("cabinet approved flood relief", "disaster", "politics"),
-            ("monsoon landslide blocked the highway", "disaster", None),
-            ("NEPSE index climbed on a banking rally", "economy", None),
-            ("parliament passed the appropriation bill", "politics", None),
-            ("police arrested a smuggling ring", "crime", "politics"),
-            ("dengue cases rose sharply", "health", None),
-        ])
-        topic_word = {"disaster": "flood relief", "economy": "market turnover",
-                      "politics": "the vote count", "crime": "the arrests",
-                      "health": "the hospital admissions"}.get(beat[1], "the development")
-        amount = rng.randint(20, 900)
-        first_settlement = rng.choice(PLACES)
-        second_settlement = rng.choice(PLACES)
-        body = wire_body(
-            place,
-            f"The {beat[0]} worth {amount} million rupees, ministers said.",
-            f"Work on {topic_word} begins next month across settlements "
-            f"in {first_settlement} and {second_settlement}.",
-            day,
-            tag,
+    beat = rng.choice(BEATS)
+    topic_word = {
+        "disaster": "flood relief",
+        "economy": "market turnover",
+        "politics": "the vote count",
+        "crime": "the arrests",
+        "health": "the hospital admissions",
+    }.get(beat[1], "the development")
+    amount = rng.randint(20, 900)
+    first_settlement = rng.choice(PLACES)
+    second_settlement = rng.choice(PLACES)
+    body = wire_body(
+        rng,
+        place,
+        f"The {beat[0]} worth {amount} million rupees, ministers said.",
+        f"Work on {topic_word} begins next month across settlements "
+        f"in {first_settlement} and {second_settlement}.",
+        day,
+        tag,
+    )
+    if beat[1] == "disaster" and rng.random() < 0.5:
+        body += (
+            " BREAKING: rescue teams report people missing "
+            "after the urgent landslide, officials said."
         )
-        if beat[1] == "disaster" and rng.random() < 0.5:
-            body += (
-                " BREAKING: rescue teams report people missing "
-                "after the urgent landslide, officials said."
-            )
-        return beat[0].capitalize(), body
-    if roll < 0.65:  # plain bulletin: review queue, certainty medium
-        subjects = [
-            (
-                "budget plan",
-                "The government announced a new budget plan amid opposition "
-                "protests in parliament.",
-            ),
-            ("bus park", f"A new bus park opened in {place} with room for 300 vehicles."),
-            ("gold price", "Gold prices hit a new record in the Nepali market on Friday."),
-            (
-                "air quality",
-                f"Air quality in {place} worsened this week as brick kilns resumed firing.",
-            ),
-            (
-                "border talks",
-                "India and Nepal resumed diplomatic talks on border "
-                "infrastructure in New Delhi.",
-            ),
-            ("cricket win", f"Nepal won a last-ball cricket thriller at the {place} stadium."),
-            ("school exams", f"Board exams began for 40,000 students across {place} district."),
-            ("film award", f"A Nepali film shot in {place} won the jury award at the festival."),
-        ]
-        title, body = rng.choice(subjects)
-        reporter = rng.choice(REPORTERS)
-        return title.capitalize(), f"{body} (Note {tag} via {reporter}.)"
-    if roll < 0.85:  # short/low: review queue, certainty low
-        shorts = [
-            f"Rain in {place} on day {day}.",
-            f"The {place} meeting ended well.",
-            f"Power cut in {place} since {day} October.",
-            f"Festival lights are up in {place}.",
-            f"Traffic jam near {place} checkpoint {rng.randint(2, 40)}.",
-            f"Water supply off in {place} ward {rng.randint(1, 32)}.",
-        ]
-        reporter = rng.choice(REPORTERS)
-        return "Brief update", f"{rng.choice(shorts)} — {reporter}."
-    # spam: review queue, certainty low (<50 chars keeps confidence down;
-    # unique code per item keeps near-dup away from identical shouters)
-    code = rng.randint(1000, 9999)
-    spams = [
-        f"Miracle cure! Code {code}, click now!!",
-        f"VIRAL prize! Code {code}, click!!",
-        f"SHOCKING deal! Code {code} guaranteed!!",
-        f"Free gold! Code {code}, click here!!",
-    ]
-    return "SHOCK SHOCK", rng.choice(spams)
+    return beat[0].capitalize(), body
+
+
+def raw_story(rng: random.Random, tag: str) -> tuple[str, str]:
+    """Thin intake snippet — left at `received`, never enqueued."""
+    place = rng.choice(PLACES)
+    snippet = rng.choice(RAW_SNIPPETS).format(
+        place=place, day=rng.randint(1, 17), n=rng.randint(1, 99)
+    )
+    return "Brief intake", f"{snippet} — {tag}."
 
 
 async def ensure_clients(session) -> None:
@@ -199,8 +200,9 @@ async def ensure_clients(session) -> None:
         print(f"  KEY (once): {full_key}")
 
 
-async def seed_items(session, count: int, rng: random.Random) -> int:
+async def seed_items(session, count: int, rng: random.Random, raw_share: float) -> tuple[int, int]:
     created = 0
+    raw_created = 0
     for i in range(count):
         source_key = f"seeddemo-{i:04d}"
         exists = (
@@ -208,7 +210,10 @@ async def seed_items(session, count: int, rng: random.Random) -> int:
         ).first()
         if exists:
             continue
-        title, body = glimpses(rng, f"s{i:04d}")
+        raw = is_raw(i, raw_share)
+        title, body = (
+            raw_story(rng, f"s{i:04d}") if raw else processed_story(rng, f"s{i:04d}")
+        )
         digest = content_hash(title, body)
         item = NewsItem(
             correlation_id=new_correlation_id(),
@@ -218,32 +223,77 @@ async def seed_items(session, count: int, rng: random.Random) -> int:
             body=body,
             source="seed-demo",
             status=ItemStatus.RECEIVED.value,
-            raw_payload={"seed": True},
+            raw_payload={"seed": True, "pool": "raw" if raw else "processed"},
         )
         session.add(item)
         await session.flush()
         await record_audit(
             session, item, stage="ingest", event_type="received",
-            detail={"source_key": source_key, "seed": True},
+            detail={"source_key": source_key, "seed": True, "pool": "raw" if raw else "processed"},
         )
-        enqueue_job(session, item.id, FIRST_STAGE)
+        if not raw:
+            enqueue_job(session, item.id, FIRST_STAGE)
+        else:
+            raw_created += 1
         await session.commit()
         created += 1
-    return created
+    return created, raw_created
+
+
+async def sweep_review_queue(session) -> int:
+    """Reject any seed item sitting in `needs_review` (audited).
+
+    The stub auto-validates the processed pool, but the live worker may race the
+    local drain and score seeds with a real provider (Groq), which can land a
+    few below threshold. Demo data never occupies the editorial queue — so any
+    straggler is rejected here with a traceable reason instead of crashing the
+    run.
+    """
+    from app.pipeline.states import transition
+
+    ids = (
+        await session.execute(
+            select(NewsItem.id).where(
+                NewsItem.source_key.like("seeddemo-%"),
+                NewsItem.status == ItemStatus.NEEDS_REVIEW.value,
+            )
+        )
+    ).scalars().all()
+    for item_id in ids:
+        item = await session.get(NewsItem, item_id)
+        transition(item, ItemStatus.REJECTED)
+        await record_audit(
+            session,
+            item,
+            stage="review",
+            event_type="review_rejected",
+            detail={
+                "reason": "seed pool never occupies the review queue (demo data)",
+                "seed_cleanup": True,
+            },
+        )
+    await session.commit()
+    return len(ids)
 
 
 async def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--count", type=int, default=200)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--raw-share",
+        type=float,
+        default=0.4,
+        help="Fraction left unprocessed at `received` (never routed to review).",
+    )
     args = parser.parse_args()
 
     setup_logging("INFO")
     rng = random.Random(args.seed)
     async with SessionLocal() as session:
         await ensure_clients(session)
-        created = await seed_items(session, args.count, rng)
-    print(f"ingested {created} new items; draining with stub…")
+        created, raw_created = await seed_items(session, args.count, rng, args.raw_share)
+    print(f"ingested {created} new items ({raw_created} raw intake); draining with stub…")
     # Drain in batches: drain() stops at max_jobs or an empty queue.
     processed = 0
     while True:
@@ -254,12 +304,23 @@ async def main() -> None:
     print(f"pipeline processed {processed} jobs")
 
     async with SessionLocal() as session:
+        swept = await sweep_review_queue(session)
+        if swept:
+            print(f"swept {swept} seed stragglers out of review (live worker raced the drain)")
         rows = (
             await session.execute(
-                select(NewsItem.status, func.count()).group_by(NewsItem.status)
+                select(NewsItem.status, func.count())
+                .where(NewsItem.source_key.like("seeddemo-%"))
+                .group_by(NewsItem.status)
             )
         ).all()
-        print("item statuses:", dict(rows))
+        statuses = dict(rows)
+        print("seed item statuses:", statuses)
+        if statuses.get("needs_review"):
+            raise SystemExit(
+                "INVARIANT VIOLATED: seed items reached the review queue after sweep — "
+                "the demo pools must never route to review."
+            )
 
 
 if __name__ == "__main__":

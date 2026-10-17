@@ -149,6 +149,11 @@ export default function ReviewScreen({ settings }: { settings: Settings }) {
   return (
     <View style={T.screen}>
       <Text style={T.h1}>Review queue</Text>
+      <Text style={T.small}>
+        State: needs_review — the AI wasn&apos;t confident enough (score &lt; 0.75 or
+        confidence &lt; 0.4), so a human must approve (→ delivered) or reject
+        (terminal). Demo/seed data never lands here.
+      </Text>
       <Button title="Reload queue" onPress={() => void load()} />
       {message ? <Text style={T.small}>{message}</Text> : null}
       <FlatList
