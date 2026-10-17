@@ -59,9 +59,14 @@ async def get_current_client(
 async def require_admin(
     authorization: str | None = Header(default=None),
     x_admin_key: str | None = Header(default=None, alias="X-Admin-Key"),
+    admin_key_query: str | None = Query(default=None, alias="admin_key"),
 ) -> bool:
+    """Admin auth: Bearer / X-Admin-Key, plus ``?admin_key=`` for browser
+    EventSource (cannot set headers). Request logs record the path only, so
+    query keys never land in logs — same precedent as ``?api_key=`` on /events.
+    """
     settings = get_settings()
-    presented = _extract_key(authorization, x_admin_key)
+    presented = _extract_key(authorization, x_admin_key) or (admin_key_query or "").strip()
     if presented is None or presented != settings.admin_api_key:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin key required")
     return True

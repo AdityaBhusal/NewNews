@@ -123,9 +123,16 @@ docs/                      # requirements, architecture, data-model, roadmap (pl
    (this exact bug was caught in integration tests).
 5. **SSE**: pure-ASGI middleware only; deliveries marked `sent` before frame write
    (at-most-once; recovery via `GET /api/v1/news`); delivery PK is a bigint identity =
-   SSE event id = `Last-Event-ID` cursor; heartbeat 15 s; 200 ms poll.
+   SSE event id = `Last-Event-ID` cursor; heartbeat 15 s; 200 ms poll. **Each stream owns
+   its DB session** (module-level generator, `is_disconnected` injected) and **commits
+   after every poll** — a session held idle-in-transaction gets killed server-side, and
+   sharing a request-scoped session poisoned teardown with `PendingRollbackError` (seen
+   in prod 2026-10-17). A failed poll rolls back + ends the stream; clients auto-reconnect
+   (`openStream` in mobile/lib/api.ts). Board stream: `GET /api/v1/track/events` (admin,
+   watermark = audit_events row count = SSE event id).
 6. **Auth**: keys formatted `nn_<prefix>_<secret>`; only sha256 hash stored; lookup by prefix,
-   verify with `hmac.compare_digest`. Admin routes need `X-Admin-Key`/Bearer = `ADMIN_API_KEY`.
+   verify with `hmac.compare_digest`. Admin routes need `X-Admin-Key`/Bearer = `ADMIN_API_KEY`
+   (plus `?admin_key=` query for browser EventSource on `/track/events`).
 7. **Settings > hardcoded**: tunables live in `Settings` (see §5). If you add a tunable, read
    it from settings — don't repeat the "config exists but unused" mistake.
 8. **Logging**: JSON lines via `app.core.logging`; pass `extra={...}` (allowed keys in
@@ -171,6 +178,8 @@ image. Green checks = M-status visible at a glance. Keep it green (invariant 9).
 Endpoints: `POST/GET /api/v1/items`, `POST /api/v1/items/{id}/media` (multipart, must be
 `received`), `GET /api/v1/news(?ack=true)`, `GET /api/v1/items/{id}`,
 `GET /api/v1/events` (SSE; `?api_key=` query auth for browsers),
+`GET /api/v1/track` + `GET /api/v1/track/events` (admin pipeline board + live stream;
+`?admin_key=` query auth for browsers),
 `POST /api/v1/clients` (admin), `GET /api/v1/clients/me`,
 `GET /api/v1/review` + `GET/POST /api/v1/review/{id}(|approve|reject)` (admin),
 `/feed` + `/live` (open demo pages), `/healthz`, `/readyz`, `/docs`.
