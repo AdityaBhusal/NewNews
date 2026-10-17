@@ -1,13 +1,14 @@
 /** NewNews field app: ingest, deliver, review, track — same API as the website. */
 
 import { useEffect, useState } from "react";
-import { Button, Text, TextInput, View } from "react-native";
+import { Button, Pressable, Text, TextInput, View } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import DeliverScreen from "./components/DeliverScreen";
 import IngestScreen from "./components/IngestScreen";
 import ReviewScreen from "./components/ReviewScreen";
 import TrackScreen from "./components/TrackScreen";
 import { DEFAULT_SETTINGS, Settings } from "./lib/api";
+import { DESK_BUNDLES } from "./lib/bundles";
 import { C, T } from "./lib/theme";
 
 const STORAGE_KEY = "newnews-settings-v1";
@@ -50,6 +51,14 @@ export default function App() {
     setSettings(cleaned);
     setDraft(cleaned);
     void AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(cleaned));
+  }
+
+  /** Tap a bundled desk: switch the client key immediately, no Save needed. */
+  function selectBundle(key: string) {
+    const next = { ...draft, clientKey: key };
+    setDraft(next);
+    setSettings(next);
+    void AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
   }
 
   return (
@@ -99,6 +108,30 @@ export default function App() {
               placeholder="https://newnews-t54x.onrender.com"
             />
             <Text style={T.small}>Local dev? Use your machine LAN IP, e.g. http://192.168.1.5:8000 (localhost means the phone itself).</Text>
+            <Text style={T.label}>Desk bundle (tap to switch instantly)</Text>
+            {DESK_BUNDLES.map((bundle) => {
+              const active = draft.clientKey === bundle.key;
+              return (
+                <Pressable
+                  key={bundle.name}
+                  onPress={() => selectBundle(bundle.key)}
+                  style={{
+                    backgroundColor: active ? C.infoSoft : C.card,
+                    borderColor: active ? C.accent : C.line,
+                    borderWidth: 1,
+                    borderRadius: 10,
+                    padding: 10,
+                    marginBottom: 6,
+                  }}
+                >
+                  <Text style={{ fontWeight: "700", color: C.ink }}>
+                    {active ? "✓ " : ""}
+                    {bundle.label}
+                  </Text>
+                  <Text style={{ color: C.muted, fontSize: 12 }}>{bundle.blurb}</Text>
+                </Pressable>
+              );
+            })}
             <Text style={T.label}>Client key (ingest · deliver · live)</Text>
             <TextInput
               style={T.input}

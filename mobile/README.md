@@ -18,8 +18,18 @@ npx expo start          # scan the QR with Expo Go (same Wi-Fi for LAN use)
 | Field | Value |
 |---|---|
 | API base URL | Cloud: `https://newnews-t54x.onrender.com` · Local: your machine's **LAN IP**, e.g. `http://192.168.1.5:8000` (`localhost` means the phone itself) |
-| Client key | `nn_…` from `python -m app.seed` or `POST /api/v1/clients` (ingest) |
+| Desk bundle | Tap a preset to switch the client key instantly: Newspaper (everything) · Radio/TV (disaster·politics·sports, high urgency only) · Foreign (politics·international) · Market (economy). Keys are the deterministic demo keys from `app/provision_desks.py` (works on local + cloud DBs) |
+| Client key | Prefilled by a desk bundle; paste any other `nn_…` key for a custom subscription |
 | Admin key | `ADMIN_API_KEY` (review tab) |
+
+## Standalone APK (EAS)
+
+`eas.json` ships a `preview` profile that builds an installable Android APK
+(no Expo Go needed). CI builds it on every push touching `mobile/`
+(`.github/workflows/android-apk.yml`) once the `EXPO_TOKEN` secret is set
+(Expo account → access token → `gh secret set EXPO_TOKEN`); the download link
+lands in the workflow's job summary. Locally: `npx eas-cli@latest build
+--platform android --profile preview`.
 
 ## Manual end-to-end (the demo)
 
