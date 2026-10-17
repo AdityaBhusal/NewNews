@@ -3,12 +3,20 @@
 # Render's free plan spins the web service down after ~15 min without traffic —
 # the worker sleeps with it, so a cold item would wait ~30-60 s for processing.
 # This pings the unauthenticated liveness probe every 10 min. No secrets needed.
+#
+# Three offset crons on purpose: GitHub's `schedule` is best-effort (ticks are
+# dropped under load, and hard for idle repos — observed 2-4 h gaps with a
+# single */10). Each entry fires independently, so the effective attempt cadence
+# is ~every 3-4 min and one dropped tick no longer costs a whole 10+ min window.
+# Wake-on-demo still applies: before a demo, open the site once to warm it.
 
 name: keep-warm
 
 on:
   schedule:
     - cron: "*/10 * * * *"
+    - cron: "3-53/10 * * * *"
+    - cron: "7-57/10 * * * *"
   workflow_dispatch:
 
 jobs:
