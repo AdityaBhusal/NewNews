@@ -173,39 +173,108 @@ export function rejectItem(settings: Settings, id: string, reason: string): Prom
  * Live delivery stream (SSE). Unlike browsers, React Native can set headers,
  * so the client key travels as `Authorization: Bearer` — no query-key needed.
  * Calls `onNews` for every `news` event; returns a cleanup function.
+ *
+ * Auto-reconnects with backoff (1s → 2s → 4s … cap 30s) — a dropped frame
+ * never leaves the screen silently dead; `onError` reports reconnect attempts.
  */
 export function subscribeDeliveries(
   settings: Settings,
-  onNews: (deliveryId: number) => void,
+  onNews: (deliveryId: number, item?: ReviewItem) => void,
   onError?: (message: string) => void,
   onOpen?: () => void,
 ): () => void {
-  const source = new EventSource(`${settings.baseUrl}/api/v1/events`, {
+  return openStream({
+    url: `${settings.baseUrl}/api/v1/events`,
     headers: { Authorization: `Bearer ${settings.clientKey}` },
+    event: "news",
+    onFrame: (data) => {
+      const parsed = data as { delivery_id?: number; item?: ReviewItem };
+      if (typeof parsed.delivery_id === "number") {
+        onNews(parsed.delivery_id, parsed.item);
+      }
+    },
+    onError,
+    onOpen,
   });
-  // Runtime dispatches our custom `news` frames; the library's types only know
-  // the built-in names, so the cast stays at this boundary (value is "news").
-  source.addEventListener("news" as "message", (event) => {
-    try {
-      const raw = (event as unknown as { data?: unknown }).data;
-      const data = JSON.parse(typeof raw === "string" ? raw : "{}") as {
-        delivery_id?: number;
-      };
-      if (typeof data.delivery_id === "number") onNews(data.delivery_id);
-    } catch {
-      // Malformed frame: ignore, the stream stays open.
-    }
+}
+
+/**
+ * Live pipeline-board stream (admin): one `board` frame whenever ANY item
+ * changes stage (audit watermark) — the Track screen refetches the board on
+ * each frame. Auto-reconnects like subscribeDeliveries; admin key travels as
+ * `X-Admin-Key` (RN's EventSource accepts headers).
+ */
+export function subscribeTrackBoard(
+  settings: Settings,
+  onBoard: (lastAuditId: number) => void,
+  onError?: (message: string) => void,
+  onOpen?: () => void,
+): () => void {
+  return openStream({
+    url: `${settings.baseUrl}/api/v1/track/events`,
+    headers: { "X-Admin-Key": settings.adminKey },
+    event: "board",
+    onFrame: (data) => {
+      const parsed = data as { audit_count?: number };
+      onBoard(typeof parsed.audit_count === "number" ? parsed.audit_count : 0);
+    },
+    onError,
+    onOpen,
   });
-  source.addEventListener("error", (event) => {
-    onError?.(
-      event.type === "error" && event.message ? String(event.message) : "stream error",
-    );
-  });
-  source.addEventListener("open", () => {
-    onOpen?.();
-  });
+}
+
+interface StreamSpec {
+  url: string;
+  headers: Record<string, string>;
+  event: string;
+  onFrame: (data: unknown) => void;
+  onError?: (message: string) => void;
+  onOpen?: () => void;
+}
+
+/**
+ * One SSE connection with automatic reconnection. RN's `EventSource` does not
+ * reconnect on its own, and Render's proxy drops idle sockets — without this,
+ * any blip silently killed the "live" view (the reload-forever symptom).
+ */
+function openStream(spec: StreamSpec): () => void {
+  let stopped = false;
+  let attempt = 0;
+  let source: EventSource | null = null;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+
+  const connect = () => {
+    if (stopped) return;
+    source = new EventSource(spec.url, { headers: spec.headers });
+    source.addEventListener("open", () => {
+      attempt = 0;
+      spec.onOpen?.();
+    });
+    source.addEventListener(spec.event as "message", (event) => {
+      try {
+        const raw = (event as unknown as { data?: unknown }).data;
+        spec.onFrame(JSON.parse(typeof raw === "string" ? raw : "{}"));
+      } catch {
+        // Malformed frame: ignore, the stream stays open.
+      }
+    });
+    source.addEventListener("error", (event) => {
+      source?.close();
+      if (stopped) return;
+      attempt += 1;
+      const delayMs = Math.min(1000 * 2 ** Math.min(attempt, 5), 30_000);
+      const reason =
+        event.type === "error" && event.message ? String(event.message) : "stream dropped";
+      spec.onError?.(`${reason} — reconnecting in ${Math.round(delayMs / 1000)}s`);
+      timer = setTimeout(connect, delayMs);
+    });
+  };
+
+  connect();
   return () => {
-    source.removeAllEventListeners();
-    source.close();
+    stopped = true;
+    if (timer) clearTimeout(timer);
+    source?.removeAllEventListeners();
+    source?.close();
   };
 }

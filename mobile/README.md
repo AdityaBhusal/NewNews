@@ -29,10 +29,13 @@ npx expo start          # scan the QR with Expo Go (same Wi-Fi for LAN use)
    upload, media 409s — resubmit (the attach-while-`received` race, FR-15).
 2. **Track tab** — always live: status, certainty + editorial badges, AI confidence,
    ingest→eligible→delivered latencies, editor approval note, pipeline stepper, media
-   list, full audit journey. Any delivery on your key refetches it over SSE.
+   list, full audit journey. An admin board stream (`/api/v1/track/events`, audit
+   watermark) refetches it on every pipeline movement — stages, approvals, new ingests
+   — reconnecting by itself if the socket drops.
 3. **Review tab** — Reload queue → open the item (score, certainty, rationale, attached
    media with extraction status, audit) → Approve with a note (or Reject with a reason).
-4. **Deliver tab** — Go live (SSE push) or Reload (REST pull) to receive with badges.
+4. **Deliver tab** — live by default (SSE push, items appended straight from the frame;
+   auto-reconnects) with Pause/Resume plus Reload (REST pull) as a fallback.
 5. **Website** — same over `/live`, `/feed`, `/track` in a browser.
 
 Photo OCR path: photograph any Nepali/English printed text — `extract_media` OCRs it

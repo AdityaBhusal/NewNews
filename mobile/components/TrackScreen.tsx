@@ -5,9 +5,10 @@
  * so you see at a glance where each story sits. Rows are collapsible: tap to
  * expand badges, latencies, editor note, media and the full audit journey.
  *
- * Always live: the SSE delivery stream is open the whole time and every
- * `news` frame refetches the board, so approvals and stage transitions walk
- * their dots forward on their own.
+ * Always live: the admin BOARD stream (`/api/v1/track/events`, audit
+ * watermark) is open the whole time and every `board` frame refetches the
+ * board, so approvals, stage transitions and new ingests walk their dots
+ * forward on their own — no manual reload.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -22,7 +23,7 @@ import {
 import {
   Settings,
   listTrackBoard,
-  subscribeDeliveries,
+  subscribeTrackBoard,
   type TrackEntry,
 } from "../lib/api";
 import { C, T, certaintyColors, latencyBetween } from "../lib/theme";
@@ -179,10 +180,7 @@ export default function TrackScreen({
   const seenRef = useRef("");
 
   const load = useCallback(async () => {
-    if (!settings.adminKey) {
-      setMessage("Set the admin key in Settings first.");
-      return;
-    }
+    if (!settings.adminKey) return; // message is derived at render
     setLoading(true);
     try {
       const board = await listTrackBoard(settings);
@@ -195,26 +193,12 @@ export default function TrackScreen({
     }
   }, [settings]);
 
-  // Load once on mount / settings change. The `await` is the boundary: every
-  // setState below runs in a promise callback after the effect body has returned,
-  // never synchronously inside the effect.
+  // Load once on mount / settings change. The fetch is async; states update in
+  // promise callbacks after the effect body has returned.
   useEffect(() => {
-    (async () => {
-      if (!settings.adminKey) {
-        setMessage("Set the admin key in Settings first.");
-        return;
-      }
-      setLoading(true);
-      try {
-        const board = await listTrackBoard(settings);
-        setEntries(board.items);
-        setMessage(board.count === 0 ? "Pipeline is empty — ingest something." : "");
-      } catch (error) {
-        setMessage(`Failed: ${error instanceof Error ? error.message : error}`);
-      } finally {
-        setLoading(false);
-      }
-    })();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings]);
 
   // A freshly ingested id auto-expands its row. Adjusting state during render
@@ -235,16 +219,18 @@ export default function TrackScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [suggestedId]);
 
-  // Always live: every delivery refetches the whole board so dots walk forward.
+  // Always live: the ADMIN BOARD stream fires on every pipeline movement
+  // (audit watermark), not just deliveries to one client — stage changes,
+  // approvals, duplicates and new items all refetch the board on their own.
   useEffect(() => {
-    if (!settings.clientKey) return;
-    const stop = subscribeDeliveries(
+    if (!settings.adminKey) return;
+    const stop = subscribeTrackBoard(
       settings,
       () => {
         setStream("update received, refetching…");
         void load().then(() => setStream("live"));
       },
-      (errorMessage) => setStream(`stream error: ${errorMessage}`),
+      (errorMessage) => setStream(errorMessage),
       () => setStream("live"),
     );
     stopRef.current = stop;
@@ -253,7 +239,7 @@ export default function TrackScreen({
       stopRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings.clientKey]);
+  }, [settings.adminKey, settings.baseUrl]);
 
   const active = entries.filter((e) => !TERMINAL.has(e.item.status)).length;
 
@@ -266,7 +252,7 @@ export default function TrackScreen({
       <Text style={T.small}>
         {entries.length} items · {active} in flight ·{" "}
         <Text style={styles.stream}>
-          ● SSE: {settings.clientKey ? stream : "off (no client key)"}
+          ● SSE: {settings.adminKey ? stream : "off (no admin key)"}
         </Text>
       </Text>
       {message ? <Text style={T.small}>{message}</Text> : null}
