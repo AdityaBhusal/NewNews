@@ -96,7 +96,9 @@ app/
 │                          #   (+ render_start.sh runs it beside the API on Render free tier)
 ├── models/                # item.py (NewsItem+MediaAsset), job.py, client.py (Client,
 │                          #   Subscription, Delivery), audit.py, base.py (Base+timestamps)
-└── seed.py                # python -m app.seed → demo client, prints key ONCE
+├── seed.py                # python -m app.seed → demo client, prints key ONCE
+└── provision_desks.py     # python -m app.provision_desks → 4 demo desks with
+                           #   FIXED keys (bundles.ts contract; idempotent rotate/create)
 tests/                     # conftest (db schema-per-test, api, admin_headers fixtures,
                            #   make_pdf_bytes PDF builder), 14 modules; integration needs
                            #   TEST_DATABASE_URL else skips; OCR tests skip without tesseract
@@ -174,6 +176,12 @@ sg docker -c 'docker compose ...'              # if not in docker group in curre
 job 1: `ruff` + full `pytest` against a **postgres:17 service container** (fresh
 `newnews_test` DB); job 2: `docker build` + verifies `ffmpeg`/`tesseract (nep)` inside the
 image. Green checks = M-status visible at a glance. Keep it green (invariant 9).
+`.github/workflows/android-apk.yml` runs on pushes touching `mobile/` (also
+`workflow_dispatch`): mobile `tsc`+`expo lint`, then an EAS cloud build of the
+`preview` APK profile via `expo/expo-github-action@v8` — needs the `EXPO_TOKEN`
+repo secret (Expo access token) and skips gracefully without it, posting the
+APK download link to the job summary. `.github/workflows/keep-warm.yml` pings
+the Render service on 3 offset crons.
 
 Endpoints: `POST/GET /api/v1/items`, `POST /api/v1/items/{id}/media` (multipart, must be
 `received`), `GET /api/v1/news(?ack=true)`, `GET /api/v1/items/{id}`,

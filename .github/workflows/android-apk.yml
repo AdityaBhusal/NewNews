@@ -1,0 +1,85 @@
+# Android APK via EAS Build (Expo's documented CI path — see mobile/AGENTS.md).
+#
+# Setup (one-time, by the repo owner):
+#   1. Create a free Expo account + access token:
+#      https://expo.dev/accounts/<you>/settings/access-tokens
+#   2. Add it as a repo secret named EXPO_TOKEN:
+#      gh secret set EXPO_TOKEN
+#
+# Without the token the build job skips gracefully (checks still run) so CI
+# stays green. With it, every push touching mobile/ triggers a cloud build of
+# the `preview` profile (installable APK) and posts the download link to the
+# job summary.
+
+name: Android APK (EAS)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "mobile/**"
+      - ".github/workflows/android-apk.yml"
+
+jobs:
+  checks:
+    name: Mobile checks (tsc + lint)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npx expo lint
+
+  apk:
+    name: Build APK (EAS cloud)
+    needs: checks
+    runs-on: ubuntu-latest
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Notice (EXPO_TOKEN not set — skipping build)
+        if: env.EXPO_TOKEN == ''
+        run: |
+          echo "::notice::EXPO_TOKEN secret is not set — skipping the EAS APK build. Create an Expo access token and add it as the EXPO_TOKEN repo secret to enable it."
+
+      - name: Install dependencies
+        if: env.EXPO_TOKEN != ''
+        run: npm ci
+
+      - name: Setup EAS
+        if: env.EXPO_TOKEN != ''
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          packager: npm
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Build Android APK (preview profile)
+        if: env.EXPO_TOKEN != ''
+        run: eas build --platform android --profile preview --non-interactive --json > build.json
+
+      - name: Post artifact link
+        if: env.EXPO_TOKEN != ''
+        run: |
+          URL=$(python3 -c "import json; print(json.load(open('build.json'))[0]['artifacts']['buildUrl'])")
+          {
+            echo "### 📱 Android APK (preview)"
+            echo "[Download the APK]($URL)"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "APK ready: $URL"
